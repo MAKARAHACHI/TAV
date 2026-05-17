@@ -1,0 +1,23 @@
+# Local IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Android / Gradle build outputs
+.gradle/
+build/
+*/build/
+local.properties
+
+# Kotlin / Java outputs
+out/
+*.class
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Legacy context-package artifact; canonical skill path is .agents/skills/
+/followup-nadlan-vision-guardian/
