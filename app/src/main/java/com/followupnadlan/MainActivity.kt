@@ -1,6 +1,8 @@
 package com.followupnadlan
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -71,9 +73,22 @@ private fun ManualWhatsAppScreen() {
     var message by remember { mutableStateOf(defaultMessageFor(selectedTemplate)) }
     var templateMenuOpen by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var phoneValidationRequested by remember { mutableStateOf(false) }
+    var messageValidationRequested by remember { mutableStateOf(false) }
 
     val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
     val whatsappLink = normalizedPhone?.let { WhatsAppLinkBuilder.build(it, message) }.orEmpty()
+    val phoneValidationMessage = when {
+        !phoneValidationRequested -> null
+        phone.isBlank() -> "יש להזין מספר טלפון או איש קשר."
+        normalizedPhone == null -> "מספר הטלפון לא תקין."
+        else -> null
+    }
+    val messageValidationMessage = when {
+        !messageValidationRequested -> null
+        message.isBlank() -> "יש לכתוב הודעה לפני פתיחת WhatsApp, שיתוף או העתקה."
+        else -> null
+    }
 
     Column(
         modifier = Modifier
@@ -99,9 +114,13 @@ private fun ManualWhatsAppScreen() {
                 phone = it
                 statusMessage = null
             },
-            label = { Text("מספר טלפון") },
+            label = { Text("מספר טלפון / איש קשר") },
             placeholder = { Text("050-1234567") },
             singleLine = true,
+            isError = phoneValidationMessage != null,
+            supportingText = {
+                phoneValidationMessage?.let { Text(it) }
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             modifier = Modifier.fillMaxWidth()
         )
@@ -139,6 +158,10 @@ private fun ManualWhatsAppScreen() {
             },
             label = { Text("הודעה לעריכה") },
             minLines = 7,
+            isError = messageValidationMessage != null,
+            supportingText = {
+                messageValidationMessage?.let { Text(it) }
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -161,15 +184,14 @@ private fun ManualWhatsAppScreen() {
         ) {
             Button(
                 onClick = {
-                    if (normalizedPhone == null) {
-                        statusMessage = "יש להזין מספר טלפון תקין."
+                    phoneValidationRequested = true
+                    messageValidationRequested = true
+                    val currentPhone = normalizedPhone
+                    if (currentPhone == null || message.isBlank()) {
+                        statusMessage = "יש להשלים את השדות המסומנים לפני פתיחת WhatsApp."
                         return@Button
                     }
-                    if (message.isBlank()) {
-                        statusMessage = "יש לכתוב הודעה לפני פתיחת WhatsApp."
-                        return@Button
-                    }
-                    statusMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(normalizedPhone, message))
+                    statusMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, message))
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -177,8 +199,41 @@ private fun ManualWhatsAppScreen() {
             }
             OutlinedButton(
                 onClick = {
+                    messageValidationRequested = true
+                    if (message.isBlank()) {
+                        statusMessage = "יש לכתוב הודעה לפני שיתוף ידני."
+                        return@OutlinedButton
+                    }
+                    statusMessage = openShareSheet(context, message)
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("שיתוף ידני")
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    messageValidationRequested = true
+                    if (message.isBlank()) {
+                        statusMessage = "יש לכתוב הודעה לפני העתקה."
+                        return@OutlinedButton
+                    }
+                    statusMessage = copyMessageToClipboard(context, message)
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("העתק הודעה")
+            }
+            OutlinedButton(
+                onClick = {
                     message = defaultMessageFor(selectedTemplate)
                     statusMessage = null
+                    messageValidationRequested = false
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -202,6 +257,26 @@ private fun openWhatsApp(context: Context, link: String): String? {
         context.startActivity(intent)
         null
     } catch (_: ActivityNotFoundException) {
-        "לא הצלחנו לפתוח את WhatsApp או דפדפן מתאים."
+        "לא הצלחנו לפתוח את WhatsApp או דפדפן מתאים. אפשר להשתמש בשיתוף ידני או בהעתקת ההודעה."
     }
+}
+
+private fun openShareSheet(context: Context, message: String): String? {
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, message)
+    }
+    val chooser = Intent.createChooser(shareIntent, "שתף הודעה")
+    return try {
+        context.startActivity(chooser)
+        "נפתח שיתוף ידני. בחר אפליקציה ושלח ידנית."
+    } catch (_: ActivityNotFoundException) {
+        "לא נמצאה אפליקציה שיכולה לשתף את ההודעה."
+    }
+}
+
+private fun copyMessageToClipboard(context: Context, message: String): String {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("FollowUp message", message))
+    return "ההודעה הועתקה."
 }
