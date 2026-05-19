@@ -44,6 +44,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.followupnadlan.profile.MyDetailsProfile
+import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.SprintOneTemplates
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
@@ -56,9 +58,52 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Surface(modifier = Modifier.fillMaxSize()) {
-                        ManualWhatsAppScreen()
+                        FollowUpApp()
                     }
                 }
+            }
+        }
+    }
+}
+
+private enum class AppScreen {
+    ManualComposer,
+    MyDetails
+}
+
+@Composable
+private fun FollowUpApp() {
+    val context = LocalContext.current
+    val myDetailsStore = remember(context) { MyDetailsStore(context.applicationContext) }
+    var currentScreen by remember { mutableStateOf(AppScreen.ManualComposer) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, top = 20.dp, end = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = { currentScreen = AppScreen.ManualComposer },
+                modifier = Modifier.weight(1f),
+                enabled = currentScreen != AppScreen.ManualComposer
+            ) {
+                Text("שליחת WhatsApp")
+            }
+            Button(
+                onClick = { currentScreen = AppScreen.MyDetails },
+                modifier = Modifier.weight(1f),
+                enabled = currentScreen != AppScreen.MyDetails
+            ) {
+                Text("הפרטים שלי")
+            }
+        }
+
+        Box(modifier = Modifier.weight(1f)) {
+            when (currentScreen) {
+                AppScreen.ManualComposer -> ManualWhatsAppScreen()
+                AppScreen.MyDetails -> MyDetailsScreen(myDetailsStore)
             }
         }
     }
@@ -243,6 +288,127 @@ private fun ManualWhatsAppScreen() {
 
         statusMessage?.let {
             Text(text = it, color = MaterialTheme.colorScheme.error)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun MyDetailsScreen(store: MyDetailsStore) {
+    val savedProfile = remember(store) { store.load() }
+    var agentName by remember { mutableStateOf(savedProfile.agentName) }
+    var officeName by remember { mutableStateOf(savedProfile.officeName) }
+    var phone by remember { mutableStateOf(savedProfile.phone) }
+    var website by remember { mutableStateOf(savedProfile.website) }
+    var businessCard by remember { mutableStateOf(savedProfile.businessCard) }
+    var signature by remember { mutableStateOf(savedProfile.signature) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "הפרטים שלי",
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = "שמירת פרטי הסוכן נעשית מקומית במכשיר בלבד.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = agentName,
+            onValueChange = {
+                agentName = it
+                statusMessage = null
+            },
+            label = { Text("שם הסוכן (agent_name)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = officeName,
+            onValueChange = {
+                officeName = it
+                statusMessage = null
+            },
+            label = { Text("שם המשרד (office_name)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = phone,
+            onValueChange = {
+                phone = it
+                statusMessage = null
+            },
+            label = { Text("טלפון (phone)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = website,
+            onValueChange = {
+                website = it
+                statusMessage = null
+            },
+            label = { Text("אתר (website)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = businessCard,
+            onValueChange = {
+                businessCard = it
+                statusMessage = null
+            },
+            label = { Text("כרטיס ביקור (business_card)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = signature,
+            onValueChange = {
+                signature = it
+                statusMessage = null
+            },
+            label = { Text("חתימה (signature)") },
+            minLines = 4,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Button(
+            onClick = {
+                store.save(
+                    MyDetailsProfile(
+                        agentName = agentName,
+                        officeName = officeName,
+                        phone = phone,
+                        website = website,
+                        businessCard = businessCard,
+                        signature = signature
+                    )
+                )
+                statusMessage = "הפרטים נשמרו במכשיר."
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("שמור פרטים")
+        }
+
+        statusMessage?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.primary)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
