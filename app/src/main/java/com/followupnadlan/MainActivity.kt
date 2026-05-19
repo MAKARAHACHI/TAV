@@ -48,6 +48,8 @@ import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.SprintOneTemplates
+import com.followupnadlan.templates.TemplateTagRenderer
+import com.followupnadlan.templates.TemplateTagValues
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
 
@@ -102,7 +104,7 @@ private fun FollowUpApp() {
 
         Box(modifier = Modifier.weight(1f)) {
             when (currentScreen) {
-                AppScreen.ManualComposer -> ManualWhatsAppScreen()
+                AppScreen.ManualComposer -> ManualWhatsAppScreen(myDetailsStore)
                 AppScreen.MyDetails -> MyDetailsScreen(myDetailsStore)
             }
         }
@@ -110,19 +112,33 @@ private fun FollowUpApp() {
 }
 
 @Composable
-private fun ManualWhatsAppScreen() {
+private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
     val context = LocalContext.current
     val templates = remember { SprintOneTemplates.all }
+    val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
     var selectedTemplate by remember { mutableStateOf(templates.first()) }
     var phone by remember { mutableStateOf("") }
+    var leadName by remember { mutableStateOf("") }
     var message by remember { mutableStateOf(defaultMessageFor(selectedTemplate)) }
     var templateMenuOpen by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var phoneValidationRequested by remember { mutableStateOf(false) }
     var messageValidationRequested by remember { mutableStateOf(false) }
 
+    val renderedMessage = TemplateTagRenderer.render(
+        message,
+        TemplateTagValues(
+            leadName = leadName,
+            agentName = myDetailsProfile.agentName,
+            officeName = myDetailsProfile.officeName,
+            phone = myDetailsProfile.phone,
+            website = myDetailsProfile.website,
+            businessCard = myDetailsProfile.businessCard,
+            signature = myDetailsProfile.signature
+        )
+    )
     val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
-    val whatsappLink = normalizedPhone?.let { WhatsAppLinkBuilder.build(it, message) }.orEmpty()
+    val whatsappLink = normalizedPhone?.let { WhatsAppLinkBuilder.build(it, renderedMessage) }.orEmpty()
     val phoneValidationMessage = when {
         !phoneValidationRequested -> null
         phone.isBlank() -> "יש להזין מספר טלפון או איש קשר."
@@ -131,7 +147,7 @@ private fun ManualWhatsAppScreen() {
     }
     val messageValidationMessage = when {
         !messageValidationRequested -> null
-        message.isBlank() -> "יש לכתוב הודעה לפני פתיחת WhatsApp, שיתוף או העתקה."
+        renderedMessage.isBlank() -> "יש לכתוב הודעה לפני פתיחת WhatsApp, שיתוף או העתקה."
         else -> null
     }
 
@@ -167,6 +183,17 @@ private fun ManualWhatsAppScreen() {
                 phoneValidationMessage?.let { Text(it) }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = leadName,
+            onValueChange = {
+                leadName = it
+                statusMessage = null
+            },
+            label = { Text("שם לקוח (lead_name)") },
+            singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -215,6 +242,19 @@ private fun ManualWhatsAppScreen() {
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text("הודעה אחרי תגיות", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = renderedMessage.ifBlank { "ההודעה הריקה לא תישלח" },
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text("קישור שיווצר", style = MaterialTheme.typography.titleSmall)
                 Text(
                     text = whatsappLink.ifBlank { "יוצג לאחר הזנת מספר תקין" },
@@ -232,11 +272,11 @@ private fun ManualWhatsAppScreen() {
                     phoneValidationRequested = true
                     messageValidationRequested = true
                     val currentPhone = normalizedPhone
-                    if (currentPhone == null || message.isBlank()) {
+                    if (currentPhone == null || renderedMessage.isBlank()) {
                         statusMessage = "יש להשלים את השדות המסומנים לפני פתיחת WhatsApp."
                         return@Button
                     }
-                    statusMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, message))
+                    statusMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, renderedMessage))
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -245,11 +285,11 @@ private fun ManualWhatsAppScreen() {
             OutlinedButton(
                 onClick = {
                     messageValidationRequested = true
-                    if (message.isBlank()) {
+                    if (renderedMessage.isBlank()) {
                         statusMessage = "יש לכתוב הודעה לפני שיתוף ידני."
                         return@OutlinedButton
                     }
-                    statusMessage = openShareSheet(context, message)
+                    statusMessage = openShareSheet(context, renderedMessage)
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -264,11 +304,11 @@ private fun ManualWhatsAppScreen() {
             OutlinedButton(
                 onClick = {
                     messageValidationRequested = true
-                    if (message.isBlank()) {
+                    if (renderedMessage.isBlank()) {
                         statusMessage = "יש לכתוב הודעה לפני העתקה."
                         return@OutlinedButton
                     }
-                    statusMessage = copyMessageToClipboard(context, message)
+                    statusMessage = copyMessageToClipboard(context, renderedMessage)
                 },
                 modifier = Modifier.weight(1f)
             ) {
