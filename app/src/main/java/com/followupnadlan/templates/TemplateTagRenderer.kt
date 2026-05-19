@@ -7,7 +7,9 @@ data class TemplateTagValues(
     val phone: String = "",
     val website: String = "",
     val businessCard: String = "",
-    val signature: String = ""
+    val signature: String = "",
+    val propertyName: String = "",
+    val propertyLink: String = ""
 )
 
 object TemplateTagRenderer {
@@ -19,7 +21,9 @@ object TemplateTagRenderer {
             "{phone}" to values.phone,
             "{website}" to values.website,
             "{business_card}" to values.businessCard,
-            "{signature}" to values.signature
+            "{signature}" to values.signature,
+            "{property_name}" to values.propertyName,
+            "{property_link}" to values.propertyLink
         )
 
         return replacements.entries.fold(template) { rendered, (tag, value) ->

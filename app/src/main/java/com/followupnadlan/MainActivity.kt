@@ -134,7 +134,9 @@ private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
             phone = myDetailsProfile.phone,
             website = myDetailsProfile.website,
             businessCard = myDetailsProfile.businessCard,
-            signature = myDetailsProfile.signature
+            signature = myDetailsProfile.signature,
+            propertyName = activePropertyName(myDetailsProfile),
+            propertyLink = activePropertyLink(myDetailsProfile)
         )
     )
     val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
@@ -343,6 +345,13 @@ private fun MyDetailsScreen(store: MyDetailsStore) {
     var website by remember { mutableStateOf(savedProfile.website) }
     var businessCard by remember { mutableStateOf(savedProfile.businessCard) }
     var signature by remember { mutableStateOf(savedProfile.signature) }
+    var property1Name by remember { mutableStateOf(savedProfile.property1Name) }
+    var property1Link by remember { mutableStateOf(savedProfile.property1Link) }
+    var property2Name by remember { mutableStateOf(savedProfile.property2Name) }
+    var property2Link by remember { mutableStateOf(savedProfile.property2Link) }
+    var property3Name by remember { mutableStateOf(savedProfile.property3Name) }
+    var property3Link by remember { mutableStateOf(savedProfile.property3Link) }
+    var activePropertyIndex by remember { mutableStateOf(savedProfile.activePropertyIndex.coerceIn(1, 3)) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -428,6 +437,73 @@ private fun MyDetailsScreen(store: MyDetailsStore) {
             modifier = Modifier.fillMaxWidth()
         )
 
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("נכסים פעילים", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "ערוך עד 3 נכסים, בחר נכס פעיל, ושמור. התגים {property_name} ו-{property_link} ישתמשו בנכס הפעיל.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                PropertyFields(
+                    index = 1,
+                    name = property1Name,
+                    link = property1Link,
+                    activePropertyIndex = activePropertyIndex,
+                    onNameChange = {
+                        property1Name = it
+                        statusMessage = null
+                    },
+                    onLinkChange = {
+                        property1Link = it
+                        statusMessage = null
+                    },
+                    onSelectActive = {
+                        activePropertyIndex = 1
+                        statusMessage = null
+                    }
+                )
+                PropertyFields(
+                    index = 2,
+                    name = property2Name,
+                    link = property2Link,
+                    activePropertyIndex = activePropertyIndex,
+                    onNameChange = {
+                        property2Name = it
+                        statusMessage = null
+                    },
+                    onLinkChange = {
+                        property2Link = it
+                        statusMessage = null
+                    },
+                    onSelectActive = {
+                        activePropertyIndex = 2
+                        statusMessage = null
+                    }
+                )
+                PropertyFields(
+                    index = 3,
+                    name = property3Name,
+                    link = property3Link,
+                    activePropertyIndex = activePropertyIndex,
+                    onNameChange = {
+                        property3Name = it
+                        statusMessage = null
+                    },
+                    onLinkChange = {
+                        property3Link = it
+                        statusMessage = null
+                    },
+                    onSelectActive = {
+                        activePropertyIndex = 3
+                        statusMessage = null
+                    }
+                )
+            }
+        }
+
         Button(
             onClick = {
                 store.save(
@@ -437,7 +513,14 @@ private fun MyDetailsScreen(store: MyDetailsStore) {
                         phone = phone,
                         website = website,
                         businessCard = businessCard,
-                        signature = signature
+                        signature = signature,
+                        property1Name = property1Name,
+                        property1Link = property1Link,
+                        property2Name = property2Name,
+                        property2Link = property2Link,
+                        property3Name = property3Name,
+                        property3Link = property3Link,
+                        activePropertyIndex = activePropertyIndex
                     )
                 )
                 statusMessage = "הפרטים נשמרו במכשיר."
@@ -453,6 +536,67 @@ private fun MyDetailsScreen(store: MyDetailsStore) {
 
         Spacer(modifier = Modifier.height(12.dp))
     }
+}
+
+@Composable
+private fun PropertyFields(
+    index: Int,
+    name: String,
+    link: String,
+    activePropertyIndex: Int,
+    onNameChange: (String) -> Unit,
+    onLinkChange: (String) -> Unit,
+    onSelectActive: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "נכס $index",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f)
+            )
+            if (activePropertyIndex == index) {
+                Button(onClick = onSelectActive, enabled = false) {
+                    Text("נכס פעיל")
+                }
+            } else {
+                OutlinedButton(onClick = onSelectActive) {
+                    Text("בחר כפעיל")
+                }
+            }
+        }
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            label = { Text("שם נכס $index") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = link,
+            onValueChange = onLinkChange,
+            label = { Text("קישור נכס $index") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+private fun activePropertyName(profile: MyDetailsProfile): String = when (profile.activePropertyIndex.coerceIn(1, 3)) {
+    1 -> profile.property1Name
+    2 -> profile.property2Name
+    else -> profile.property3Name
+}
+
+private fun activePropertyLink(profile: MyDetailsProfile): String = when (profile.activePropertyIndex.coerceIn(1, 3)) {
+    1 -> profile.property1Link
+    2 -> profile.property2Link
+    else -> profile.property3Link
 }
 
 private fun defaultMessageFor(template: MessageTemplate): String = template.body
