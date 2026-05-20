@@ -51,6 +51,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.followupnadlan.followuplog.FollowUpActionType
+import com.followupnadlan.followuplog.FollowUpLogEntry
+import com.followupnadlan.followuplog.FollowUpLogStorage
+import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.notifications.FollowUpNotificationHelper
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
@@ -111,6 +115,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val context = LocalContext.current
     val myDetailsStore = remember(context) { MyDetailsStore(context.applicationContext) }
     val templateStore = remember(context) { TemplateStore(context.applicationContext) }
+    val followUpLogStore = remember(context) { FollowUpLogStore(context.applicationContext) }
     val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
     var currentScreen by remember { mutableStateOf(AppScreen.ManualComposer) }
     var templateRevision by remember { mutableStateOf(0) }
@@ -188,6 +193,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                 AppScreen.ManualComposer -> ManualWhatsAppScreen(
                     myDetailsStore = myDetailsStore,
                     templateStore = templateStore,
+                    followUpLogStore = followUpLogStore,
                     templateRevision = templateRevision,
                     phone = manualPhone,
                     leadName = manualLeadName,
@@ -212,6 +218,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
 private fun ManualWhatsAppScreen(
     myDetailsStore: MyDetailsStore,
     templateStore: TemplateStore,
+    followUpLogStore: FollowUpLogStore,
     templateRevision: Int,
     phone: String,
     leadName: String,
@@ -398,7 +405,21 @@ private fun ManualWhatsAppScreen(
                         statusMessage = "יש להשלים את השדות המסומנים לפני פתיחת WhatsApp."
                         return@Button
                     }
-                    statusMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, renderedMessage))
+                    val resultMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, renderedMessage))
+                    statusMessage = resultMessage
+                    if (resultMessage == null) {
+                        followUpLogStore.append(
+                            followUpLogEntry(
+                                leadName = leadName,
+                                phoneNumber = currentPhone,
+                                selectedTemplate = selectedTemplate,
+                                propertyName = activePropertyName(myDetailsProfile),
+                                propertyLink = activePropertyLink(myDetailsProfile),
+                                renderedMessage = renderedMessage,
+                                actionType = FollowUpActionType.WHATSAPP_OPENED
+                            )
+                        )
+                    }
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -411,7 +432,21 @@ private fun ManualWhatsAppScreen(
                         statusMessage = "יש לכתוב הודעה לפני שיתוף ידני."
                         return@OutlinedButton
                     }
-                    statusMessage = openShareSheet(context, renderedMessage)
+                    val result = openShareSheet(context, renderedMessage)
+                    statusMessage = result.statusMessage
+                    if (result.opened) {
+                        followUpLogStore.append(
+                            followUpLogEntry(
+                                leadName = leadName,
+                                phoneNumber = normalizedPhone ?: phone,
+                                selectedTemplate = selectedTemplate,
+                                propertyName = activePropertyName(myDetailsProfile),
+                                propertyLink = activePropertyLink(myDetailsProfile),
+                                renderedMessage = renderedMessage,
+                                actionType = FollowUpActionType.SHARE_OPENED
+                            )
+                        )
+                    }
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -431,6 +466,17 @@ private fun ManualWhatsAppScreen(
                         return@OutlinedButton
                     }
                     statusMessage = copyMessageToClipboard(context, renderedMessage)
+                    followUpLogStore.append(
+                        followUpLogEntry(
+                            leadName = leadName,
+                            phoneNumber = normalizedPhone ?: phone,
+                            selectedTemplate = selectedTemplate,
+                            propertyName = activePropertyName(myDetailsProfile),
+                            propertyLink = activePropertyLink(myDetailsProfile),
+                            renderedMessage = renderedMessage,
+                            actionType = FollowUpActionType.COPY_USED
+                        )
+                    )
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -918,6 +964,26 @@ private fun activePropertyLink(profile: MyDetailsProfile): String = when (profil
 
 private fun defaultMessageFor(template: MessageTemplate): String = template.body
 
+private fun followUpLogEntry(
+    leadName: String,
+    phoneNumber: String,
+    selectedTemplate: MessageTemplate,
+    propertyName: String,
+    propertyLink: String,
+    renderedMessage: String,
+    actionType: FollowUpActionType
+): FollowUpLogEntry = FollowUpLogEntry(
+    leadName = leadName,
+    phoneNumber = phoneNumber,
+    templateId = selectedTemplate.id,
+    templateTitle = selectedTemplate.title,
+    propertyName = propertyName,
+    propertyLink = propertyLink,
+    messagePreview = FollowUpLogStorage.messagePreview(renderedMessage),
+    actionType = actionType,
+    timestampEpochMs = System.currentTimeMillis()
+)
+
 private fun openWhatsApp(context: Context, link: String): String? {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
     return try {
@@ -928,17 +994,28 @@ private fun openWhatsApp(context: Context, link: String): String? {
     }
 }
 
-private fun openShareSheet(context: Context, message: String): String? {
+private data class ShareSheetResult(
+    val opened: Boolean,
+    val statusMessage: String
+)
+
+private fun openShareSheet(context: Context, message: String): ShareSheetResult {
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, message)
     }
     val chooser = Intent.createChooser(shareIntent, "שתף הודעה")
-    return try {
+    try {
         context.startActivity(chooser)
-        "נפתח שיתוף ידני. בחר אפליקציה ושלח ידנית."
+        return ShareSheetResult(
+            opened = true,
+            statusMessage = "נפתח שיתוף ידני. בחר אפליקציה ושלח ידנית."
+        )
     } catch (_: ActivityNotFoundException) {
-        "לא נמצאה אפליקציה שיכולה לשתף את ההודעה."
+        return ShareSheetResult(
+            opened = false,
+            statusMessage = "לא נמצאה אפליקציה שיכולה לשתף את ההודעה."
+        )
     }
 }
 
