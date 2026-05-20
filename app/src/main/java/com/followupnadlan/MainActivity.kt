@@ -56,6 +56,8 @@ import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.notifications.FollowUpNotificationHelper
+import com.followupnadlan.postcall.CallDetectionPreferences
+import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
@@ -117,11 +119,16 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val templateStore = remember(context) { TemplateStore(context.applicationContext) }
     val followUpLogStore = remember(context) { FollowUpLogStore(context.applicationContext) }
     val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
+    val callDetectionPreferences = remember(context) { CallDetectionPreferences(context.applicationContext) }
     var currentScreen by remember { mutableStateOf(AppScreen.ManualComposer) }
     var templateRevision by remember { mutableStateOf(0) }
     var manualPhone by remember { mutableStateOf(initialLaunchState.phone) }
     var manualLeadName by remember { mutableStateOf(initialLaunchState.leadName) }
     var notificationStatus by remember { mutableStateOf<String?>(null) }
+    var callDetectionEnabled by remember { mutableStateOf(callDetectionPreferences.isEnabled()) }
+    var callDetectionStatus by remember {
+        mutableStateOf(if (callDetectionEnabled) "זיהוי שיחות מסומן כפעיל במכשיר." else null)
+    }
     var pendingNotificationLaunch by remember { mutableStateOf<FollowUpLaunchState?>(null) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -155,6 +162,62 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                 templateId = launchState.templateId
             )
             notificationStatus = "ההתראה נוצרה. הקש עליה כדי לפתוח כרטיס שליחה מהיר."
+        }
+    }
+    val startCallDetection: () -> Unit = {
+        val resultMessage = startCallDetectionService(context)
+        if (resultMessage == null) {
+            callDetectionPreferences.setEnabled(true)
+            callDetectionEnabled = true
+            callDetectionStatus = "זיהוי שיחות הופעל. האפליקציה לא קוראת יומן שיחות ולא שולחת הודעות."
+        } else {
+            callDetectionPreferences.setEnabled(false)
+            callDetectionEnabled = false
+            callDetectionStatus = resultMessage
+        }
+    }
+    val callDetectionPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val phoneGranted = grants[Manifest.permission.READ_PHONE_STATE] == true ||
+            context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            grants[Manifest.permission.POST_NOTIFICATIONS] == true ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+        if (!phoneGranted) {
+            callDetectionPreferences.setEnabled(false)
+            callDetectionEnabled = false
+            callDetectionStatus = "הרשאת מצב טלפון נדחתה. מצב ידני ממשיך לעבוד."
+        } else {
+            startCallDetection()
+            if (!notificationsGranted) {
+                callDetectionStatus = "זיהוי שיחות הופעל, אבל הרשאת התראות חסרה. ייתכן שלא תוצג התראת פולואפ."
+            }
+        }
+    }
+    val toggleCallDetection: () -> Unit = {
+        if (callDetectionEnabled) {
+            stopCallDetectionService(context)
+            callDetectionPreferences.setEnabled(false)
+            callDetectionEnabled = false
+            callDetectionStatus = "זיהוי שיחות כובה. מצב ידני ממשיך לעבוד."
+        } else {
+            val permissions = buildList {
+                add(Manifest.permission.READ_PHONE_STATE)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }.filter {
+                context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+            }
+
+            if (permissions.isEmpty()) {
+                startCallDetection()
+            } else {
+                callDetectionStatus = "כדי לזהות סיום שיחה נדרשת הרשאת מצב טלפון. המידע נשאר מקומי."
+                callDetectionPermissionLauncher.launch(permissions.toTypedArray())
+            }
         }
     }
 
@@ -201,7 +264,10 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     onLeadNameChange = { manualLeadName = it },
                     initialTemplateId = initialLaunchState.templateId,
                     notificationStatus = notificationStatus,
-                    onTriggerTestNotification = triggerTestNotification
+                    onTriggerTestNotification = triggerTestNotification,
+                    callDetectionEnabled = callDetectionEnabled,
+                    callDetectionStatus = callDetectionStatus,
+                    onToggleCallDetection = toggleCallDetection
                 )
                 AppScreen.MyDetails -> MyDetailsScreen(myDetailsStore)
                 AppScreen.MessageTemplates -> TemplateManagementScreen(
@@ -226,7 +292,10 @@ private fun ManualWhatsAppScreen(
     onLeadNameChange: (String) -> Unit,
     initialTemplateId: String,
     notificationStatus: String?,
-    onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit
+    onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit,
+    callDetectionEnabled: Boolean,
+    callDetectionStatus: String?,
+    onToggleCallDetection: () -> Unit
 ) {
     val context = LocalContext.current
     val templates = remember(templateStore, templateRevision) { templateStore.loadTemplates() }
@@ -295,6 +364,15 @@ private fun ManualWhatsAppScreen(
             Text("בדיקת התראת פולואפ")
         }
         notificationStatus?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.primary)
+        }
+        OutlinedButton(
+            onClick = onToggleCallDetection,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (callDetectionEnabled) "כבה זיהוי שיחות אוטומטי" else "הפעל זיהוי שיחות אוטומטי")
+        }
+        callDetectionStatus?.let {
             Text(text = it, color = MaterialTheme.colorScheme.primary)
         }
 
@@ -410,11 +488,6 @@ private fun ManualWhatsAppScreen(
                     if (resultMessage == null) {
                         followUpLogStore.append(
                             followUpLogEntry(
-                                leadName = leadName,
-                                phoneNumber = currentPhone,
-                                selectedTemplate = selectedTemplate,
-                                propertyName = activePropertyName(myDetailsProfile),
-                                propertyLink = activePropertyLink(myDetailsProfile),
                                 renderedMessage = renderedMessage,
                                 actionType = FollowUpActionType.WHATSAPP_OPENED
                             )
@@ -437,11 +510,6 @@ private fun ManualWhatsAppScreen(
                     if (result.opened) {
                         followUpLogStore.append(
                             followUpLogEntry(
-                                leadName = leadName,
-                                phoneNumber = normalizedPhone ?: phone,
-                                selectedTemplate = selectedTemplate,
-                                propertyName = activePropertyName(myDetailsProfile),
-                                propertyLink = activePropertyLink(myDetailsProfile),
                                 renderedMessage = renderedMessage,
                                 actionType = FollowUpActionType.SHARE_OPENED
                             )
@@ -468,11 +536,6 @@ private fun ManualWhatsAppScreen(
                     statusMessage = copyMessageToClipboard(context, renderedMessage)
                     followUpLogStore.append(
                         followUpLogEntry(
-                            leadName = leadName,
-                            phoneNumber = normalizedPhone ?: phone,
-                            selectedTemplate = selectedTemplate,
-                            propertyName = activePropertyName(myDetailsProfile),
-                            propertyLink = activePropertyLink(myDetailsProfile),
                             renderedMessage = renderedMessage,
                             actionType = FollowUpActionType.COPY_USED
                         )
@@ -964,24 +1027,33 @@ private fun activePropertyLink(profile: MyDetailsProfile): String = when (profil
 
 private fun defaultMessageFor(template: MessageTemplate): String = template.body
 
+private fun startCallDetectionService(context: Context): String? {
+    val intent = Intent(context, CallDetectionService::class.java)
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        null
+    } catch (_: SecurityException) {
+        "לא ניתן להפעיל זיהוי שיחות. בדוק הרשאות מצב טלפון והתראות."
+    } catch (_: IllegalStateException) {
+        "לא ניתן להפעיל שירות זיהוי שיחות כרגע. מצב ידני עדיין זמין."
+    }
+}
+
+private fun stopCallDetectionService(context: Context) {
+    context.stopService(Intent(context, CallDetectionService::class.java))
+}
+
 private fun followUpLogEntry(
-    leadName: String,
-    phoneNumber: String,
-    selectedTemplate: MessageTemplate,
-    propertyName: String,
-    propertyLink: String,
     renderedMessage: String,
     actionType: FollowUpActionType
 ): FollowUpLogEntry = FollowUpLogEntry(
-    leadName = leadName,
-    phoneNumber = phoneNumber,
-    templateId = selectedTemplate.id,
-    templateTitle = selectedTemplate.title,
-    propertyName = propertyName,
-    propertyLink = propertyLink,
-    messagePreview = FollowUpLogStorage.messagePreview(renderedMessage),
     actionType = actionType,
-    timestampEpochMs = System.currentTimeMillis()
+    timestampEpochMs = System.currentTimeMillis(),
+    messagePreview = FollowUpLogStorage.messagePreview(renderedMessage)
 )
 
 private fun openWhatsApp(context: Context, link: String): String? {

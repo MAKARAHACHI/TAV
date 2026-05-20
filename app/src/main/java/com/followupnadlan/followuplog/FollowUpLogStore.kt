@@ -22,14 +22,14 @@ class FollowUpLogStore(context: Context) {
 }
 
 internal object FollowUpLogStorage {
-    const val MAX_ENTRIES = 50
-    const val MESSAGE_PREVIEW_MAX_CHARS = 120
+    const val MAX_ENTRIES = 100
+    const val MESSAGE_PREVIEW_MAX_CHARS = 80
 
     fun append(
         rawEntries: String,
         entry: FollowUpLogEntry,
         maxEntries: Int = MAX_ENTRIES
-    ): String = encode((decode(rawEntries) + entry).takeLast(maxEntries))
+    ): String = encode((decode(rawEntries) + entry.copy(messagePreview = messagePreview(entry.messagePreview))).takeLast(maxEntries))
 
     fun decode(rawEntries: String): List<FollowUpLogEntry> =
         rawEntries.lineSequence()
@@ -45,35 +45,22 @@ internal object FollowUpLogStorage {
     }
 
     private fun encodeLine(entry: FollowUpLogEntry): String = listOf(
-        VERSION,
-        encodeValue(entry.leadName),
-        encodeValue(entry.phoneNumber),
-        encodeValue(entry.templateId),
-        encodeValue(entry.templateTitle),
-        encodeValue(entry.propertyName),
-        encodeValue(entry.propertyLink),
-        encodeValue(entry.messagePreview),
+        entry.timestampEpochMs.toString(),
         entry.actionType.name,
-        entry.timestampEpochMs.toString()
+        encodeValue(messagePreview(entry.messagePreview))
     ).joinToString(FIELD_SEPARATOR)
 
     private fun decodeLine(line: String): FollowUpLogEntry? {
         val fields = line.split(FIELD_SEPARATOR)
-        if (fields.size != FIELD_COUNT || fields[0] != VERSION) return null
+        if (fields.size != FIELD_COUNT) return null
 
-        val actionType = runCatching { FollowUpActionType.valueOf(fields[8]) }.getOrNull() ?: return null
-        val timestamp = fields[9].toLongOrNull() ?: return null
+        val timestamp = fields[0].toLongOrNull() ?: return null
+        val actionType = runCatching { FollowUpActionType.valueOf(fields[1]) }.getOrNull() ?: return null
 
         return FollowUpLogEntry(
-            leadName = decodeValue(fields[1]),
-            phoneNumber = decodeValue(fields[2]),
-            templateId = decodeValue(fields[3]),
-            templateTitle = decodeValue(fields[4]),
-            propertyName = decodeValue(fields[5]),
-            propertyLink = decodeValue(fields[6]),
-            messagePreview = decodeValue(fields[7]),
             actionType = actionType,
-            timestampEpochMs = timestamp
+            timestampEpochMs = timestamp,
+            messagePreview = messagePreview(decodeValue(fields[2]))
         )
     }
 
@@ -83,7 +70,6 @@ internal object FollowUpLogStorage {
     private fun decodeValue(value: String): String =
         String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8)
 
-    private const val VERSION = "v1"
     private const val FIELD_SEPARATOR = "|"
-    private const val FIELD_COUNT = 10
+    private const val FIELD_COUNT = 3
 }

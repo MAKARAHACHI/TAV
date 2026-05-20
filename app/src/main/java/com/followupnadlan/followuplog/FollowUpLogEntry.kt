@@ -1,15 +1,9 @@
 package com.followupnadlan.followuplog
 
 data class FollowUpLogEntry(
-    val leadName: String,
-    val phoneNumber: String,
-    val templateId: String,
-    val templateTitle: String,
-    val propertyName: String,
-    val propertyLink: String,
-    val messagePreview: String,
     val actionType: FollowUpActionType,
-    val timestampEpochMs: Long
+    val timestampEpochMs: Long,
+    val messagePreview: String
 )
 
 enum class FollowUpActionType {

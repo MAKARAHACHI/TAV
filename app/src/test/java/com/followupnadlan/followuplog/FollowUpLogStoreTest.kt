@@ -8,13 +8,7 @@ class FollowUpLogStoreTest {
     @Test
     fun appendAndDecodeRoundTripsEntryFields() {
         val entry = entry(
-            leadName = "יוסי כהן",
-            phoneNumber = "972501234567",
-            templateId = "buyer_property_details",
-            templateTitle = "פרטי נכס",
-            propertyName = "דירה ברעננה",
-            propertyLink = "https://example.com/property",
-            messagePreview = "שלום יוסי, בהמשך לשיחה...",
+            messagePreview = "Hebrew preview text",
             actionType = FollowUpActionType.WHATSAPP_OPENED,
             timestampEpochMs = 123456789L
         )
@@ -27,13 +21,20 @@ class FollowUpLogStoreTest {
 
     @Test
     fun appendTrimsOldEntriesWhenMaxSizeIsReached() {
-        val raw = (1L..4L).fold("") { current, timestamp ->
-            FollowUpLogStorage.append(current, entry(timestampEpochMs = timestamp), maxEntries = 3)
+        val raw = (1L..101L).fold("") { current, timestamp ->
+            FollowUpLogStorage.append(current, entry(timestampEpochMs = timestamp))
         }
 
         val decoded = FollowUpLogStorage.decode(raw)
 
-        assertEquals(listOf(2L, 3L, 4L), decoded.map { it.timestampEpochMs })
+        assertEquals(100, decoded.size)
+        assertEquals(2L, decoded.first().timestampEpochMs)
+        assertEquals(101L, decoded.last().timestampEpochMs)
+    }
+
+    @Test
+    fun emptyLoadReturnsEmptyList() {
+        assertEquals(emptyList<FollowUpLogEntry>(), FollowUpLogStorage.decode(""))
     }
 
     @Test
@@ -45,13 +46,20 @@ class FollowUpLogStoreTest {
     }
 
     @Test
-    fun messagePreviewCompactsWhitespaceAndTrimsLength() {
+    fun messagePreviewCompactsWhitespaceAndTrimsToEightyCharacters() {
+        val preview = FollowUpLogStorage.messagePreview("a".repeat(90))
+
+        assertEquals(80, preview.length)
+    }
+
+    @Test
+    fun messagePreviewCompactsWhitespace() {
         val preview = FollowUpLogStorage.messagePreview(
-            "  שלום\n\nיוסי,   הנה פרטי הנכס והקישור להמשך בדיקה.  ",
+            "  hello\n\nthere,   compact   this please  ",
             maxChars = 20
         )
 
-        assertEquals("שלום יוסי, הנה פרטי", preview)
+        assertEquals("hello there, compact", preview)
     }
 
     @Test
@@ -67,25 +75,22 @@ class FollowUpLogStoreTest {
         assertEquals(FollowUpActionType.COPY_USED, decoded.first().actionType)
     }
 
+    @Test
+    fun hebrewPreviewRoundTripsThroughBase64() {
+        val preview = "שלום יוסי, זה טקסט בעברית לבדיקת שמירה מקומית"
+
+        val decoded = FollowUpLogStorage.decode(FollowUpLogStorage.append("", entry(messagePreview = preview)))
+
+        assertEquals(preview, decoded.single().messagePreview)
+    }
+
     private fun entry(
-        leadName: String = "",
-        phoneNumber: String = "",
-        templateId: String = "",
-        templateTitle: String = "",
-        propertyName: String = "",
-        propertyLink: String = "",
         messagePreview: String = "",
         actionType: FollowUpActionType = FollowUpActionType.SHARE_OPENED,
         timestampEpochMs: Long = 1L
     ) = FollowUpLogEntry(
-        leadName = leadName,
-        phoneNumber = phoneNumber,
-        templateId = templateId,
-        templateTitle = templateTitle,
-        propertyName = propertyName,
-        propertyLink = propertyLink,
-        messagePreview = messagePreview,
         actionType = actionType,
-        timestampEpochMs = timestampEpochMs
+        timestampEpochMs = timestampEpochMs,
+        messagePreview = messagePreview
     )
 }
