@@ -98,7 +98,7 @@ Reason: Sprint 9 created the call-end notification trigger. Sprint 10 should mak
 - Validation command or manual check: `.\gradlew.bat test`; source review.
 - Rollback: Delete `PostCallCard.kt`.
 
-### Task 1.2: Add Pure Tests For Card Set
+### Task 1.2: Unit Tests for Card Set
 - Location: `app/src/test/java/com/followupnadlan/postcall/PostCallCardTest.kt`
 - Description: Test that all four required cards exist in order, have nonblank Hebrew titles/subtitles, stable ids, and no accidental extra card.
 - Dependencies: Existing JUnit setup.

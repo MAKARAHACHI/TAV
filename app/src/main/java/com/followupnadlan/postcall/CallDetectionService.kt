@@ -10,7 +10,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -20,6 +22,7 @@ import com.followupnadlan.notifications.FollowUpNotificationHelper
 
 class CallDetectionService : Service() {
     private lateinit var monitor: CallStateMonitor
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var telephonyCallback: TelephonyCallback? = null
     private var phoneStateListener: PhoneStateListener? = null
 
@@ -29,11 +32,7 @@ class CallDetectionService : Service() {
         monitor = CallStateMonitor(
             minCallDurationSeconds = preferences.minCallDurationSeconds.toLong(),
             onCallEnded = {
-                FollowUpNotificationHelper(applicationContext).showFollowUpNotification(
-                    phone = "",
-                    leadName = "",
-                    templateId = ""
-                )
+                postFollowUpNotificationAfterCallEnd()
             }
         )
         startStatusNotification()
@@ -45,8 +44,29 @@ class CallDetectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         unregisterCallListener()
         super.onDestroy()
+    }
+
+    private fun postFollowUpNotificationAfterCallEnd() {
+        mainHandler.postDelayed(
+            {
+                val latestCall = CallLogReader(applicationContext).readLatestCall()
+                val contactFirstName = latestCall?.phoneNumber?.let {
+                    ContactNameResolver(applicationContext).resolveFirstName(it)
+                }
+                FollowUpNotificationHelper(applicationContext).showFollowUpNotification(
+                    phone = latestCall?.phoneNumber.orEmpty(),
+                    leadName = contactFirstName.orEmpty(),
+                    templateId = "",
+                    callDurationSeconds = latestCall?.durationSeconds,
+                    callTimestampMillis = latestCall?.timestampMillis,
+                    callType = latestCall?.type?.toNotificationExtra()
+                )
+            },
+            CALL_LOG_READ_DELAY_MILLIS
+        )
     }
 
     private fun registerCallListener() {
@@ -149,9 +169,16 @@ class CallDetectionService : Service() {
         const val STATUS_CHANNEL_ID = "call_detection_status"
         const val STATUS_NOTIFICATION_ID = 9001
         const val STATUS_REQUEST_CODE = 9001
+        const val CALL_LOG_READ_DELAY_MILLIS = 1_000L
         const val STATUS_CHANNEL_NAME = "זיהוי שיחות"
         const val STATUS_CHANNEL_DESCRIPTION = "התראת סטטוס לזיהוי סיום שיחה"
         const val STATUS_TITLE = "זיהוי שיחות פעיל"
         const val STATUS_BODY = "האפליקציה תציג התראת פולואפ אחרי שיחה."
     }
+}
+
+private fun FollowUpCallType.toNotificationExtra(): String = when (this) {
+    FollowUpCallType.Incoming -> "incoming"
+    FollowUpCallType.Outgoing -> "outgoing"
+    FollowUpCallType.Missed -> "missed"
 }

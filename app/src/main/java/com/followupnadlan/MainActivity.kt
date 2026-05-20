@@ -58,6 +58,8 @@ import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.notifications.FollowUpNotificationHelper
 import com.followupnadlan.postcall.CallDetectionPreferences
 import com.followupnadlan.postcall.CallDetectionService
+import com.followupnadlan.postcall.PostCallCard
+import com.followupnadlan.postcall.PostCallCards
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
@@ -88,6 +90,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppScreen {
     ManualComposer,
+    PostCallDecision,
     MyDetails,
     MessageTemplates
 }
@@ -95,7 +98,11 @@ private enum class AppScreen {
 private data class FollowUpLaunchState(
     val phone: String = "",
     val leadName: String = "",
-    val templateId: String = ""
+    val templateId: String = "",
+    val callDurationSeconds: Long? = null,
+    val callTimestampMillis: Long? = null,
+    val callType: String? = null,
+    val openedFromNotification: Boolean = false
 ) {
     companion object {
         fun fromIntent(intent: Intent?): FollowUpLaunchState {
@@ -106,7 +113,11 @@ private data class FollowUpLaunchState(
             return FollowUpLaunchState(
                 phone = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_PHONE).orEmpty(),
                 leadName = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_LEAD_NAME).orEmpty(),
-                templateId = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_TEMPLATE_ID).orEmpty()
+                templateId = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_TEMPLATE_ID).orEmpty(),
+                callDurationSeconds = intent.optionalLongExtra(FollowUpNotificationHelper.EXTRA_CALL_DURATION_SECONDS),
+                callTimestampMillis = intent.optionalLongExtra(FollowUpNotificationHelper.EXTRA_CALL_TIMESTAMP_MILLIS),
+                callType = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_CALL_TYPE),
+                openedFromNotification = true
             )
         }
     }
@@ -120,10 +131,18 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val followUpLogStore = remember(context) { FollowUpLogStore(context.applicationContext) }
     val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
     val callDetectionPreferences = remember(context) { CallDetectionPreferences(context.applicationContext) }
-    var currentScreen by remember { mutableStateOf(AppScreen.ManualComposer) }
+    var currentScreen by remember {
+        mutableStateOf(if (initialLaunchState.openedFromNotification) AppScreen.PostCallDecision else AppScreen.ManualComposer)
+    }
     var templateRevision by remember { mutableStateOf(0) }
     var manualPhone by remember { mutableStateOf(initialLaunchState.phone) }
     var manualLeadName by remember { mutableStateOf(initialLaunchState.leadName) }
+    var manualTemplateId by remember { mutableStateOf(initialLaunchState.templateId) }
+    var postCallDurationSeconds by remember { mutableStateOf(initialLaunchState.callDurationSeconds) }
+    var postCallType by remember { mutableStateOf(initialLaunchState.callType) }
+    var manualMessageOverride by remember { mutableStateOf<String?>(null) }
+    var manualMessageRevision by remember { mutableStateOf(0) }
+    var postCallSelectionStatus by remember { mutableStateOf<String?>(null) }
     var notificationStatus by remember { mutableStateOf<String?>(null) }
     var callDetectionEnabled by remember { mutableStateOf(callDetectionPreferences.isEnabled()) }
     var callDetectionStatus by remember {
@@ -181,6 +200,10 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     ) { grants ->
         val phoneGranted = grants[Manifest.permission.READ_PHONE_STATE] == true ||
             context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val callLogGranted = grants[Manifest.permission.READ_CALL_LOG] == true ||
+            context.checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val contactsGranted = grants[Manifest.permission.READ_CONTACTS] == true ||
+            context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         val notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             grants[Manifest.permission.POST_NOTIFICATIONS] == true ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -191,9 +214,11 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             callDetectionStatus = "הרשאת מצב טלפון נדחתה. מצב ידני ממשיך לעבוד."
         } else {
             startCallDetection()
-            if (!notificationsGranted) {
-                callDetectionStatus = "זיהוי שיחות הופעל, אבל הרשאת התראות חסרה. ייתכן שלא תוצג התראת פולואפ."
-            }
+            callDetectionStatus = callDetectionStatusAfterPermissions(
+                notificationsGranted = notificationsGranted,
+                callLogGranted = callLogGranted,
+                contactsGranted = contactsGranted
+            )
         }
     }
     val toggleCallDetection: () -> Unit = {
@@ -205,6 +230,8 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
         } else {
             val permissions = buildList {
                 add(Manifest.permission.READ_PHONE_STATE)
+                add(Manifest.permission.READ_CALL_LOG)
+                add(Manifest.permission.READ_CONTACTS)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     add(Manifest.permission.POST_NOTIFICATIONS)
                 }
@@ -215,39 +242,56 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             if (permissions.isEmpty()) {
                 startCallDetection()
             } else {
-                callDetectionStatus = "כדי לזהות סיום שיחה נדרשת הרשאת מצב טלפון. המידע נשאר מקומי."
+                callDetectionStatus = "כדי לזהות סיום שיחה ולמלא מספר, האפליקציה צריכה הרשאת מצב טלפון וקריאת השיחה האחרונה. אנשי קשר משמשים רק למילוי שם פרטי אם מאשרים. המידע נשאר מקומי ולא נשלחות הודעות אוטומטית."
                 callDetectionPermissionLauncher.launch(permissions.toTypedArray())
             }
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 20.dp, top = 20.dp, end = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Button(
-                onClick = { currentScreen = AppScreen.ManualComposer },
-                modifier = Modifier.weight(1f),
-                enabled = currentScreen != AppScreen.ManualComposer
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("שליחת WhatsApp")
+                Button(
+                    onClick = { currentScreen = AppScreen.ManualComposer },
+                    modifier = Modifier.weight(1f),
+                    enabled = currentScreen != AppScreen.ManualComposer
+                ) {
+                    Text("שליחת WhatsApp")
+                }
+                Button(
+                    onClick = { currentScreen = AppScreen.PostCallDecision },
+                    modifier = Modifier.weight(1f),
+                    enabled = currentScreen != AppScreen.PostCallDecision
+                ) {
+                    Text("מה קרה?")
+                }
             }
-            Button(
-                onClick = { currentScreen = AppScreen.MyDetails },
-                modifier = Modifier.weight(1f),
-                enabled = currentScreen != AppScreen.MyDetails
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("הפרטים שלי")
-            }
-            Button(
-                onClick = { currentScreen = AppScreen.MessageTemplates },
-                modifier = Modifier.weight(1f),
-                enabled = currentScreen != AppScreen.MessageTemplates
-            ) {
-                Text("תבניות")
+                Button(
+                    onClick = { currentScreen = AppScreen.MyDetails },
+                    modifier = Modifier.weight(1f),
+                    enabled = currentScreen != AppScreen.MyDetails
+                ) {
+                    Text("הפרטים שלי")
+                }
+                Button(
+                    onClick = { currentScreen = AppScreen.MessageTemplates },
+                    modifier = Modifier.weight(1f),
+                    enabled = currentScreen != AppScreen.MessageTemplates
+                ) {
+                    Text("תבניות")
+                }
             }
         }
 
@@ -262,12 +306,29 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     leadName = manualLeadName,
                     onPhoneChange = { manualPhone = it },
                     onLeadNameChange = { manualLeadName = it },
-                    initialTemplateId = initialLaunchState.templateId,
+                    initialTemplateId = manualTemplateId,
+                    initialMessageOverride = manualMessageOverride,
+                    initialMessageRevision = manualMessageRevision,
                     notificationStatus = notificationStatus,
                     onTriggerTestNotification = triggerTestNotification,
                     callDetectionEnabled = callDetectionEnabled,
                     callDetectionStatus = callDetectionStatus,
                     onToggleCallDetection = toggleCallDetection
+                )
+                AppScreen.PostCallDecision -> PostCallScreen(
+                    phone = manualPhone,
+                    leadName = manualLeadName,
+                    callDurationSeconds = postCallDurationSeconds,
+                    callType = postCallType,
+                    selectionStatus = postCallSelectionStatus,
+                    onCardSelected = { card ->
+                        manualTemplateId = card.composerHint.templateId
+                        manualMessageOverride = card.composerHint.initialMessage
+                        manualMessageRevision += 1
+                        postCallSelectionStatus = null
+                        notificationStatus = "נבחר כרטיס: ${card.title}. ההודעה הוכנה לעריכה ידנית."
+                        currentScreen = AppScreen.ManualComposer
+                    }
                 )
                 AppScreen.MyDetails -> MyDetailsScreen(myDetailsStore)
                 AppScreen.MessageTemplates -> TemplateManagementScreen(
@@ -276,6 +337,81 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     onTemplatesChanged = { templateRevision += 1 }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PostCallScreen(
+    phone: String,
+    leadName: String,
+    callDurationSeconds: Long?,
+    callType: String?,
+    selectionStatus: String?,
+    onCardSelected: (PostCallCard) -> Unit
+) {
+    val baseContextLine = when {
+        leadName.isNotBlank() && phone.isNotBlank() -> "שיחה עם $leadName · $phone"
+        leadName.isNotBlank() -> "שיחה עם $leadName"
+        phone.isNotBlank() -> "שיחה עם $phone"
+        else -> "לא זוהה מספר מההתראה. אפשר לבחור כרטיס ולהמשיך ידנית."
+    }
+    val metadataLine = callMetadataLabel(callType, callDurationSeconds)
+    val contextLine = if (metadataLine == null || phone.isBlank()) {
+        baseContextLine
+    } else {
+        "$baseContextLine · $metadataLine"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "מה קרה בשיחה?",
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = contextLine,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        PostCallCards.all.forEach { card ->
+            Card(
+                onClick = { onCardSelected(card) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = card.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = card.subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        selectionStatus?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -291,6 +427,8 @@ private fun ManualWhatsAppScreen(
     onPhoneChange: (String) -> Unit,
     onLeadNameChange: (String) -> Unit,
     initialTemplateId: String,
+    initialMessageOverride: String?,
+    initialMessageRevision: Int,
     notificationStatus: String?,
     onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit,
     callDetectionEnabled: Boolean,
@@ -300,10 +438,13 @@ private fun ManualWhatsAppScreen(
     val context = LocalContext.current
     val templates = remember(templateStore, templateRevision) { templateStore.loadTemplates() }
     val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
-    var selectedTemplate by remember(templates, initialTemplateId) {
-        mutableStateOf(templates.firstOrNull { it.id == initialTemplateId } ?: templates.first())
+    val initialSelectedTemplate = templates.firstOrNull { it.id == initialTemplateId } ?: templates.first()
+    var selectedTemplate by remember(templates, initialTemplateId, initialMessageRevision) {
+        mutableStateOf(initialSelectedTemplate)
     }
-    var message by remember { mutableStateOf(defaultMessageFor(selectedTemplate)) }
+    var message by remember(templates, initialTemplateId, initialMessageRevision) {
+        mutableStateOf(initialMessageOverride ?: defaultMessageFor(initialSelectedTemplate))
+    }
     var templateMenuOpen by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var phoneValidationRequested by remember { mutableStateOf(false) }
@@ -1026,6 +1167,41 @@ private fun activePropertyLink(profile: MyDetailsProfile): String = when (profil
 }
 
 private fun defaultMessageFor(template: MessageTemplate): String = template.body
+
+private fun callDetectionStatusAfterPermissions(
+    notificationsGranted: Boolean,
+    callLogGranted: Boolean,
+    contactsGranted: Boolean
+): String {
+    val notes = mutableListOf("זיהוי שיחות הופעל.")
+    if (!callLogGranted) {
+        notes += "ללא הרשאת יומן שיחות, המספר יישאר להזנה ידנית."
+    }
+    if (!contactsGranted) {
+        notes += "ללא הרשאת אנשי קשר, השם יישאר להזנה ידנית."
+    }
+    if (!notificationsGranted) {
+        notes += "ללא הרשאת התראות, ייתכן שלא תוצג התראת פולואפ."
+    }
+    notes += "אין שליחה אוטומטית ל-WhatsApp."
+    return notes.joinToString(" ")
+}
+
+private fun callMetadataLabel(callType: String?, durationSeconds: Long?): String? {
+    val typeLabel = when (callType) {
+        "incoming" -> "נכנסת"
+        "outgoing" -> "יוצאת"
+        "missed" -> "לא נענתה"
+        else -> null
+    }
+    val durationLabel = durationSeconds?.let { "${it.coerceAtLeast(0L)} שניות" }
+    return listOfNotNull(typeLabel, durationLabel)
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ")
+}
+
+private fun Intent.optionalLongExtra(name: String): Long? =
+    if (hasExtra(name)) getLongExtra(name, 0L) else null
 
 private fun startCallDetectionService(context: Context): String? {
     val intent = Intent(context, CallDetectionService::class.java)

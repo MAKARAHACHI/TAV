@@ -14,7 +14,10 @@ class FollowUpNotificationHelper(private val context: Context) {
     fun showFollowUpNotification(
         phone: String,
         leadName: String,
-        templateId: String
+        templateId: String,
+        callDurationSeconds: Long? = null,
+        callTimestampMillis: Long? = null,
+        callType: String? = null
     ) {
         createChannel()
 
@@ -23,7 +26,16 @@ class FollowUpNotificationHelper(private val context: Context) {
             .setContentTitle(NOTIFICATION_TITLE)
             .setContentText(NOTIFICATION_BODY)
             .setStyle(Notification.BigTextStyle().bigText(NOTIFICATION_BODY))
-            .setContentIntent(createContentIntent(phone, leadName, templateId))
+            .setContentIntent(
+                createContentIntent(
+                    phone = phone,
+                    leadName = leadName,
+                    templateId = templateId,
+                    callDurationSeconds = callDurationSeconds,
+                    callTimestampMillis = callTimestampMillis,
+                    callType = callType
+                )
+            )
             .setAutoCancel(true)
             .build()
 
@@ -46,7 +58,10 @@ class FollowUpNotificationHelper(private val context: Context) {
     private fun createContentIntent(
         phone: String,
         leadName: String,
-        templateId: String
+        templateId: String,
+        callDurationSeconds: Long?,
+        callTimestampMillis: Long?,
+        callType: String?
     ): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = ACTION_OPEN_FOLLOW_UP
@@ -54,6 +69,9 @@ class FollowUpNotificationHelper(private val context: Context) {
             putExtra(EXTRA_PHONE, phone)
             putExtra(EXTRA_LEAD_NAME, leadName)
             putExtra(EXTRA_TEMPLATE_ID, templateId)
+            callDurationSeconds?.let { putExtra(EXTRA_CALL_DURATION_SECONDS, it) }
+            callTimestampMillis?.let { putExtra(EXTRA_CALL_TIMESTAMP_MILLIS, it) }
+            callType?.let { putExtra(EXTRA_CALL_TYPE, it) }
         }
 
         return PendingIntent.getActivity(
@@ -72,6 +90,9 @@ class FollowUpNotificationHelper(private val context: Context) {
         const val EXTRA_PHONE = "followup_phone"
         const val EXTRA_LEAD_NAME = "followup_lead_name"
         const val EXTRA_TEMPLATE_ID = "followup_template_id"
+        const val EXTRA_CALL_DURATION_SECONDS = "followup_call_duration_seconds"
+        const val EXTRA_CALL_TIMESTAMP_MILLIS = "followup_call_timestamp_millis"
+        const val EXTRA_CALL_TYPE = "followup_call_type"
         const val REQUEST_CODE_OPEN_FOLLOW_UP = 8001
 
         private const val CHANNEL_ID = "follow_up_cards"
