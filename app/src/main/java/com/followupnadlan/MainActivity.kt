@@ -1,14 +1,19 @@
 package com.followupnadlan
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,15 +45,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.followupnadlan.notifications.FollowUpNotificationHelper
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.SprintOneTemplates
+import com.followupnadlan.templates.TemplateStore
+import com.followupnadlan.templates.TemplateTagInsertionLogic
 import com.followupnadlan.templates.TemplateTagRenderer
+import com.followupnadlan.templates.TemplateTags
 import com.followupnadlan.templates.TemplateTagValues
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
@@ -56,11 +67,12 @@ import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val initialLaunchState = FollowUpLaunchState.fromIntent(intent)
         setContent {
             MaterialTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Surface(modifier = Modifier.fillMaxSize()) {
-                        FollowUpApp()
+                        FollowUpApp(initialLaunchState = initialLaunchState)
                     }
                 }
             }
@@ -70,14 +82,76 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppScreen {
     ManualComposer,
-    MyDetails
+    MyDetails,
+    MessageTemplates
+}
+
+private data class FollowUpLaunchState(
+    val phone: String = "",
+    val leadName: String = "",
+    val templateId: String = ""
+) {
+    companion object {
+        fun fromIntent(intent: Intent?): FollowUpLaunchState {
+            if (intent?.action != FollowUpNotificationHelper.ACTION_OPEN_FOLLOW_UP) {
+                return FollowUpLaunchState()
+            }
+
+            return FollowUpLaunchState(
+                phone = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_PHONE).orEmpty(),
+                leadName = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_LEAD_NAME).orEmpty(),
+                templateId = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_TEMPLATE_ID).orEmpty()
+            )
+        }
+    }
 }
 
 @Composable
-private fun FollowUpApp() {
+private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val context = LocalContext.current
     val myDetailsStore = remember(context) { MyDetailsStore(context.applicationContext) }
+    val templateStore = remember(context) { TemplateStore(context.applicationContext) }
+    val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
     var currentScreen by remember { mutableStateOf(AppScreen.ManualComposer) }
+    var templateRevision by remember { mutableStateOf(0) }
+    var manualPhone by remember { mutableStateOf(initialLaunchState.phone) }
+    var manualLeadName by remember { mutableStateOf(initialLaunchState.leadName) }
+    var notificationStatus by remember { mutableStateOf<String?>(null) }
+    var pendingNotificationLaunch by remember { mutableStateOf<FollowUpLaunchState?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val pendingLaunch = pendingNotificationLaunch
+        pendingNotificationLaunch = null
+        if (granted && pendingLaunch != null) {
+            notificationHelper.showFollowUpNotification(
+                phone = pendingLaunch.phone,
+                leadName = pendingLaunch.leadName,
+                templateId = pendingLaunch.templateId
+            )
+            notificationStatus = "ההתראה נוצרה. הקש עליה כדי לפתוח כרטיס שליחה מהיר."
+        } else {
+            notificationStatus = "הרשאת התראות נדחתה. אפשר עדיין להשתמש במסך השליחה הידני."
+        }
+    }
+    val triggerTestNotification: (String, String, String) -> Unit = { phone, leadName, templateId ->
+        val launchState = FollowUpLaunchState(phone = phone, leadName = leadName, templateId = templateId)
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingNotificationLaunch = launchState
+            notificationStatus = "נדרשת הרשאת התראות כדי להציג כרטיס פולואפ."
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            notificationHelper.showFollowUpNotification(
+                phone = launchState.phone,
+                leadName = launchState.leadName,
+                templateId = launchState.templateId
+            )
+            notificationStatus = "ההתראה נוצרה. הקש עליה כדי לפתוח כרטיס שליחה מהיר."
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -100,25 +174,59 @@ private fun FollowUpApp() {
             ) {
                 Text("הפרטים שלי")
             }
+            Button(
+                onClick = { currentScreen = AppScreen.MessageTemplates },
+                modifier = Modifier.weight(1f),
+                enabled = currentScreen != AppScreen.MessageTemplates
+            ) {
+                Text("תבניות")
+            }
         }
 
         Box(modifier = Modifier.weight(1f)) {
             when (currentScreen) {
-                AppScreen.ManualComposer -> ManualWhatsAppScreen(myDetailsStore)
+                AppScreen.ManualComposer -> ManualWhatsAppScreen(
+                    myDetailsStore = myDetailsStore,
+                    templateStore = templateStore,
+                    templateRevision = templateRevision,
+                    phone = manualPhone,
+                    leadName = manualLeadName,
+                    onPhoneChange = { manualPhone = it },
+                    onLeadNameChange = { manualLeadName = it },
+                    initialTemplateId = initialLaunchState.templateId,
+                    notificationStatus = notificationStatus,
+                    onTriggerTestNotification = triggerTestNotification
+                )
                 AppScreen.MyDetails -> MyDetailsScreen(myDetailsStore)
+                AppScreen.MessageTemplates -> TemplateManagementScreen(
+                    templateStore = templateStore,
+                    myDetailsStore = myDetailsStore,
+                    onTemplatesChanged = { templateRevision += 1 }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
+private fun ManualWhatsAppScreen(
+    myDetailsStore: MyDetailsStore,
+    templateStore: TemplateStore,
+    templateRevision: Int,
+    phone: String,
+    leadName: String,
+    onPhoneChange: (String) -> Unit,
+    onLeadNameChange: (String) -> Unit,
+    initialTemplateId: String,
+    notificationStatus: String?,
+    onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit
+) {
     val context = LocalContext.current
-    val templates = remember { SprintOneTemplates.all }
+    val templates = remember(templateStore, templateRevision) { templateStore.loadTemplates() }
     val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
-    var selectedTemplate by remember { mutableStateOf(templates.first()) }
-    var phone by remember { mutableStateOf("") }
-    var leadName by remember { mutableStateOf("") }
+    var selectedTemplate by remember(templates, initialTemplateId) {
+        mutableStateOf(templates.firstOrNull { it.id == initialTemplateId } ?: templates.first())
+    }
     var message by remember { mutableStateOf(defaultMessageFor(selectedTemplate)) }
     var templateMenuOpen by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -171,10 +279,22 @@ private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
             style = MaterialTheme.typography.bodyMedium
         )
 
+        OutlinedButton(
+            onClick = {
+                onTriggerTestNotification(phone, leadName, selectedTemplate.id)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("בדיקת התראת פולואפ")
+        }
+        notificationStatus?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.primary)
+        }
+
         OutlinedTextField(
             value = phone,
             onValueChange = {
-                phone = it
+                onPhoneChange(it)
                 statusMessage = null
             },
             label = { Text("מספר טלפון / איש קשר") },
@@ -191,7 +311,7 @@ private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
         OutlinedTextField(
             value = leadName,
             onValueChange = {
-                leadName = it
+                onLeadNameChange(it)
                 statusMessage = null
             },
             label = { Text("שם לקוח (lead_name)") },
@@ -333,6 +453,203 @@ private fun ManualWhatsAppScreen(myDetailsStore: MyDetailsStore) {
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun TemplateManagementScreen(
+    templateStore: TemplateStore,
+    myDetailsStore: MyDetailsStore,
+    onTemplatesChanged: () -> Unit
+) {
+    val builtInTemplates = remember { SprintOneTemplates.all }
+    var savedTemplates by remember(templateStore) { mutableStateOf(templateStore.loadTemplates()) }
+    val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
+    var selectedTemplate by remember { mutableStateOf(savedTemplates.first()) }
+    var draftBodyField by remember {
+        mutableStateOf(TextFieldValue(selectedTemplate.body, TextRange(selectedTemplate.body.length)))
+    }
+    var leadName by remember { mutableStateOf("") }
+    var templateMenuOpen by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    val renderedPreview = TemplateTagRenderer.render(
+        draftBodyField.text,
+        TemplateTagValues(
+            leadName = leadName,
+            agentName = myDetailsProfile.agentName,
+            officeName = myDetailsProfile.officeName,
+            phone = myDetailsProfile.phone,
+            website = myDetailsProfile.website,
+            businessCard = myDetailsProfile.businessCard,
+            signature = myDetailsProfile.signature,
+            propertyName = activePropertyName(myDetailsProfile),
+            propertyLink = activePropertyLink(myDetailsProfile)
+        )
+    )
+    val builtInBody = builtInTemplates.firstOrNull { it.id == selectedTemplate.id }?.body.orEmpty()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "ניהול תבניות הודעה",
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = "ערוך תבניות מקומיות, הוסף תגים, ושמור לשימוש מהיר במסך השליחה.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Box {
+            OutlinedButton(
+                onClick = { templateMenuOpen = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(selectedTemplate.title)
+            }
+            DropdownMenu(
+                expanded = templateMenuOpen,
+                onDismissRequest = { templateMenuOpen = false }
+            ) {
+                savedTemplates.forEach { template ->
+                    DropdownMenuItem(
+                        text = { Text(template.title) },
+                        onClick = {
+                            selectedTemplate = template
+                            draftBodyField = TextFieldValue(template.body, TextRange(template.body.length))
+                            statusMessage = null
+                            templateMenuOpen = false
+                        }
+                    )
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = leadName,
+            onValueChange = {
+                leadName = it
+                statusMessage = null
+            },
+            label = { Text("שם לקוח לתצוגה מקדימה (lead_name)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("הוסף תג לתבנית", style = MaterialTheme.typography.titleMedium)
+                SupportedTagButtons(onTagSelected = { tag ->
+                    val insertion = TemplateTagInsertionLogic.insertTag(
+                        text = draftBodyField.text,
+                        selectionStart = draftBodyField.selection.start,
+                        selectionEnd = draftBodyField.selection.end,
+                        tag = tag
+                    )
+                    draftBodyField = TextFieldValue(
+                        text = insertion.text,
+                        selection = TextRange(insertion.cursorPosition)
+                    )
+                    statusMessage = null
+                })
+            }
+        }
+
+        OutlinedTextField(
+            value = draftBodyField,
+            onValueChange = {
+                draftBodyField = it
+                statusMessage = null
+            },
+            label = { Text("טקסט תבנית") },
+            minLines = 8,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("תצוגה מקדימה אחרי תגים", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = renderedPreview.ifBlank { "התבנית הריקה תיחסם במסך השליחה" },
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = {
+                    val updatedTemplate = selectedTemplate.copy(body = draftBodyField.text)
+                    templateStore.saveTemplate(updatedTemplate)
+                    savedTemplates = templateStore.loadTemplates()
+                    selectedTemplate = updatedTemplate
+                    onTemplatesChanged()
+                    statusMessage = "התבנית נשמרה במכשיר."
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("שמור תבנית")
+            }
+            OutlinedButton(
+                onClick = {
+                    templateStore.resetTemplate(selectedTemplate.id)
+                    val resetTemplate = selectedTemplate.copy(body = builtInBody)
+                    savedTemplates = templateStore.loadTemplates()
+                    selectedTemplate = resetTemplate
+                    draftBodyField = TextFieldValue(builtInBody, TextRange(builtInBody.length))
+                    onTemplatesChanged()
+                    statusMessage = "התבנית חזרה לנוסח המקורי."
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("שחזר מקור")
+            }
+        }
+
+        statusMessage?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.primary)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun SupportedTagButtons(onTagSelected: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TemplateTags.supported.chunked(3).forEach { rowTags ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowTags.forEach { tag ->
+                    OutlinedButton(
+                        onClick = { onTagSelected(tag.key) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(tag.label)
+                    }
+                }
+            }
+        }
     }
 }
 
