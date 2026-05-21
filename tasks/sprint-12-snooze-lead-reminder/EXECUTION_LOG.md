@@ -1,7 +1,7 @@
 # EXECUTION LOG: Sprint 12 Snooze + Local Lead + Reminder Notification on Room
 
 ## Sub-sprint 1: Introduce Room (Empty DB, No Features)
-Status: In progress
+Status: Completed
 Started: 2026-05-20
 Completed: 2026-05-20
 
@@ -220,3 +220,53 @@ Completed: 2026-05-21
 
 ### Next recommended action
 - Commit the current Sprint 12 state through Sub-sprint 4. Sub-sprint 5 remains not started.
+
+## Sub-sprint 5: Local Lead Save
+Status: Completed with notes
+Started: 2026-05-21
+Completed: 2026-05-21
+
+### Changes made
+- `app/src/main/java/com/followupnadlan/MainActivity.kt`: added a minimal explicit `שמור כליד` action on the existing composer surface.
+- `app/src/main/java/com/followupnadlan/MainActivity.kt`: saves a `LeadEntity` through `LeadDao` with local-only fields: name, phone, type `UNKNOWN`, status `NEW`, and follow-up timestamp.
+- `app/src/main/java/com/followupnadlan/MainActivity.kt`: updates a restored snoozed task to `SAVED_AS_LEAD` when a lead is saved from that restored task.
+- No lead list, lead search, dashboard, analytics, backend, or contact-management UI was added.
+
+### Validation run
+- Command: `.\gradlew.bat test`
+- Result: PASS
+- Evidence: `BUILD SUCCESSFUL in 9s`; `51 actionable tasks: 14 executed, 37 up-to-date`.
+
+- Command: `.\gradlew.bat assembleDebug`
+- Result: PASS
+- Evidence: First sandbox run failed on the known Gradle wrapper lock access: `gradle-8.9-bin.zip.lck (Access is denied)`. Elevated rerun passed: `BUILD SUCCESSFUL in 3s`; `37 actionable tasks: 3 executed, 34 up-to-date`.
+
+- Command: `git diff -- app/build.gradle.kts build.gradle.kts app/src/main/AndroidManifest.xml`
+- Result: PASS
+- Evidence: Empty diff since Sub-sprint 5 did not change dependencies or manifest.
+
+- Command: forbidden-scope grep from PLAN.md
+- Result: PASS
+- Evidence: No matches.
+
+- Command: `Select-String -Path app\src\main\java\com\followupnadlan\*.kt,app\src\main\java\com\followupnadlan\**\*.kt,app\src\test\java\com\followupnadlan\**\*.kt -Pattern "×|Ã|â"`
+- Result: PASS
+- Evidence: No matches.
+
+- Command: `git diff --check`
+- Result: PASS
+- Evidence: No whitespace errors; only expected Windows CRLF warnings.
+
+### Manual QA
+- Check: Lead save persists across restart
+- Result: NOT RUN
+- Notes: Source/build validation passed. Human manual report covered the snooze loop before Sub-sprint 5 was implemented, so it is not claimed as lead-save persistence evidence.
+
+### Deviations from plan
+- None.
+
+### Blockers
+- Manual lead-save restart evidence is still pending before a full real-device PASS.
+
+### Next recommended action
+- Commit Sprint 12 final implementation state. Keep review as PASS WITH NOTES until lead-save persistence is manually confirmed.

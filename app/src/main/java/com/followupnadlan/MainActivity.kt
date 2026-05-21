@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import com.followupnadlan.data.AppDatabase
 import com.followupnadlan.data.followup.FollowUpTaskDao
 import com.followupnadlan.data.followup.FollowUpTaskEntity
+import com.followupnadlan.data.lead.LeadDao
+import com.followupnadlan.data.lead.LeadEntity
 import com.followupnadlan.followuplog.FollowUpActionType
 import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
@@ -359,6 +361,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     initialMessageRevision = manualMessageRevision,
                     restoredTaskId = restoredTaskId,
                     followUpTaskDao = database.followUpTaskDao(),
+                    leadDao = database.leadDao(),
                     reminderScheduler = reminderScheduler,
                     onRestoredTaskStatusChanged = { restoredTaskId = it },
                     notificationStatus = notificationStatus,
@@ -483,6 +486,7 @@ private fun ManualWhatsAppScreen(
     initialMessageRevision: Int,
     restoredTaskId: Long?,
     followUpTaskDao: FollowUpTaskDao,
+    leadDao: LeadDao,
     reminderScheduler: ReminderScheduler,
     onRestoredTaskStatusChanged: (Long?) -> Unit,
     notificationStatus: String?,
@@ -573,6 +577,40 @@ private fun ManualWhatsAppScreen(
             } else {
                 "תזכורת נקבעה."
             }
+        }
+    }
+    val saveLead: () -> Unit = saveLead@{
+        val now = System.currentTimeMillis()
+        if (phone.isBlank() && leadName.isBlank()) {
+            statusMessage = "יש להזין שם או מספר לפני שמירת ליד."
+            return@saveLead
+        }
+
+        scope.launch {
+            leadDao.insert(
+                LeadEntity(
+                    fullName = leadName.takeIf { it.isNotBlank() },
+                    phone = phone,
+                    type = LEAD_TYPE_UNKNOWN,
+                    status = LEAD_STATUS_NEW,
+                    notes = null,
+                    lastCallAtEpochMs = null,
+                    lastFollowUpAtEpochMs = now,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now
+                )
+            )
+            restoredTaskId?.let { taskId ->
+                followUpTaskDao.getById(taskId)?.let { task ->
+                    followUpTaskDao.update(
+                        task.copy(
+                            status = FOLLOW_UP_STATUS_SAVED_AS_LEAD,
+                            updatedAtEpochMs = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+            statusMessage = "הליד נשמר במכשיר."
         }
     }
 
@@ -835,6 +873,13 @@ private fun ManualWhatsAppScreen(
                     }
                 }
             }
+        }
+
+        OutlinedButton(
+            onClick = saveLead,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("שמור כליד")
         }
 
         statusMessage?.let {
@@ -1330,6 +1375,9 @@ private const val FOLLOW_UP_SOURCE_MANUAL_COMPOSER = "MANUAL_COMPOSER"
 private const val FOLLOW_UP_STATUS_SNOOZED = "SNOOZED"
 private const val FOLLOW_UP_STATUS_OPENED = "OPENED"
 private const val FOLLOW_UP_STATUS_WHATSAPP_OPENED = "WHATSAPP_OPENED"
+private const val FOLLOW_UP_STATUS_SAVED_AS_LEAD = "SAVED_AS_LEAD"
+private const val LEAD_TYPE_UNKNOWN = "UNKNOWN"
+private const val LEAD_STATUS_NEW = "NEW"
 
 private fun callMetadataLabel(callType: String?, durationSeconds: Long?): String? {
     val typeLabel = when (callType) {
