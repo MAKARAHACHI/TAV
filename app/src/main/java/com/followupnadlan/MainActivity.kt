@@ -37,9 +37,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,11 +53,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.followupnadlan.data.AppDatabase
+import com.followupnadlan.data.followup.FollowUpTaskDao
+import com.followupnadlan.data.followup.FollowUpTaskEntity
 import com.followupnadlan.followuplog.FollowUpActionType
 import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.notifications.FollowUpNotificationHelper
+import com.followupnadlan.notifications.ReminderNotificationHelper
 import com.followupnadlan.postcall.CallDetectionPreferences
 import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.postcall.PostCallCard
@@ -71,6 +77,11 @@ import com.followupnadlan.templates.TemplateTags
 import com.followupnadlan.templates.TemplateTagValues
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
+import com.followupnadlan.snooze.ReminderScheduler
+import com.followupnadlan.snooze.SnoozeOption
+import com.followupnadlan.snooze.SnoozeTimeCalculator
+import java.time.ZoneId
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,10 +113,18 @@ private data class FollowUpLaunchState(
     val callDurationSeconds: Long? = null,
     val callTimestampMillis: Long? = null,
     val callType: String? = null,
+    val snoozedTaskId: Long? = null,
     val openedFromNotification: Boolean = false
 ) {
     companion object {
         fun fromIntent(intent: Intent?): FollowUpLaunchState {
+            if (intent?.action == ReminderNotificationHelper.ACTION_OPEN_SNOOZED_TASK) {
+                return FollowUpLaunchState(
+                    snoozedTaskId = intent.optionalLongExtra(ReminderNotificationHelper.EXTRA_TASK_ID),
+                    openedFromNotification = false
+                )
+            }
+
             if (intent?.action != FollowUpNotificationHelper.ACTION_OPEN_FOLLOW_UP) {
                 return FollowUpLaunchState()
             }
@@ -130,6 +149,9 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val templateStore = remember(context) { TemplateStore(context.applicationContext) }
     val followUpLogStore = remember(context) { FollowUpLogStore(context.applicationContext) }
     val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
+    val database = remember(context) { AppDatabase.getInstance(context.applicationContext) }
+    val reminderScheduler = remember(context) { ReminderScheduler(context.applicationContext) }
+    val scope = rememberCoroutineScope()
     val callDetectionPreferences = remember(context) { CallDetectionPreferences(context.applicationContext) }
     var currentScreen by remember {
         mutableStateOf(if (initialLaunchState.openedFromNotification) AppScreen.PostCallDecision else AppScreen.ManualComposer)
@@ -142,6 +164,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     var postCallType by remember { mutableStateOf(initialLaunchState.callType) }
     var manualMessageOverride by remember { mutableStateOf<String?>(null) }
     var manualMessageRevision by remember { mutableStateOf(0) }
+    var restoredTaskId by remember { mutableStateOf<Long?>(null) }
     var postCallSelectionStatus by remember { mutableStateOf<String?>(null) }
     var notificationStatus by remember { mutableStateOf<String?>(null) }
     var callDetectionEnabled by remember { mutableStateOf(callDetectionPreferences.isEnabled()) }
@@ -248,6 +271,31 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
         }
     }
 
+    LaunchedEffect(initialLaunchState.snoozedTaskId) {
+        val taskId = initialLaunchState.snoozedTaskId ?: return@LaunchedEffect
+        val task = database.followUpTaskDao().getById(taskId)
+        if (task == null) {
+            notificationStatus = "התזכורת נפתחה, אבל הכרטיס כבר לא נמצא. אפשר להמשיך ידנית."
+            currentScreen = AppScreen.ManualComposer
+            return@LaunchedEffect
+        }
+
+        manualPhone = task.phone.orEmpty()
+        manualLeadName = task.contactName.orEmpty()
+        manualTemplateId = task.selectedTemplateId.orEmpty()
+        manualMessageOverride = task.draftText
+        manualMessageRevision += 1
+        restoredTaskId = task.id
+        currentScreen = AppScreen.ManualComposer
+        notificationStatus = "תזכורת נפתחה. הכרטיס שוחזר לעריכה."
+        database.followUpTaskDao().update(
+            task.copy(
+                status = FOLLOW_UP_STATUS_OPENED,
+                updatedAtEpochMs = System.currentTimeMillis()
+            )
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -309,6 +357,10 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     initialTemplateId = manualTemplateId,
                     initialMessageOverride = manualMessageOverride,
                     initialMessageRevision = manualMessageRevision,
+                    restoredTaskId = restoredTaskId,
+                    followUpTaskDao = database.followUpTaskDao(),
+                    reminderScheduler = reminderScheduler,
+                    onRestoredTaskStatusChanged = { restoredTaskId = it },
                     notificationStatus = notificationStatus,
                     onTriggerTestNotification = triggerTestNotification,
                     callDetectionEnabled = callDetectionEnabled,
@@ -429,6 +481,10 @@ private fun ManualWhatsAppScreen(
     initialTemplateId: String,
     initialMessageOverride: String?,
     initialMessageRevision: Int,
+    restoredTaskId: Long?,
+    followUpTaskDao: FollowUpTaskDao,
+    reminderScheduler: ReminderScheduler,
+    onRestoredTaskStatusChanged: (Long?) -> Unit,
     notificationStatus: String?,
     onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit,
     callDetectionEnabled: Boolean,
@@ -436,6 +492,7 @@ private fun ManualWhatsAppScreen(
     onToggleCallDetection: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val templates = remember(templateStore, templateRevision) { templateStore.loadTemplates() }
     val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
     val initialSelectedTemplate = templates.firstOrNull { it.id == initialTemplateId } ?: templates.first()
@@ -447,6 +504,7 @@ private fun ManualWhatsAppScreen(
     }
     var templateMenuOpen by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var snoozeOptionsOpen by remember { mutableStateOf(false) }
     var phoneValidationRequested by remember { mutableStateOf(false) }
     var messageValidationRequested by remember { mutableStateOf(false) }
 
@@ -476,6 +534,46 @@ private fun ManualWhatsAppScreen(
         !messageValidationRequested -> null
         renderedMessage.isBlank() -> "יש לכתוב הודעה לפני פתיחת WhatsApp, שיתוף או העתקה."
         else -> null
+    }
+
+    val scheduleSnooze: (SnoozeOption) -> Unit = { option ->
+        val now = System.currentTimeMillis()
+        val reminderAt = SnoozeTimeCalculator.computeTriggerAt(
+            option = option,
+            nowMillis = now,
+            zoneId = ZoneId.systemDefault()
+        )
+        val task = FollowUpTaskEntity(
+            id = restoredTaskId ?: 0L,
+            phone = phone,
+            contactName = leadName,
+            callEndedAtEpochMs = null,
+            callDurationSeconds = null,
+            source = FOLLOW_UP_SOURCE_MANUAL_COMPOSER,
+            selectedTemplateId = selectedTemplate.id,
+            draftText = message,
+            leadType = null,
+            propertyLink = activePropertyLink(myDetailsProfile),
+            reminderAtEpochMs = reminderAt,
+            status = FOLLOW_UP_STATUS_SNOOZED,
+            createdAtEpochMs = now,
+            updatedAtEpochMs = now
+        )
+
+        scope.launch {
+            val savedTaskId = followUpTaskDao.insert(task)
+            reminderScheduler.schedule(savedTaskId, reminderAt)
+            onRestoredTaskStatusChanged(savedTaskId)
+            snoozeOptionsOpen = false
+            statusMessage = if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                "התזכורת נקבעה, אבל הרשאת התראות חסרה ולכן ייתכן שלא תוצג התראה."
+            } else {
+                "תזכורת נקבעה."
+            }
+        }
     }
 
     Column(
@@ -633,6 +731,18 @@ private fun ManualWhatsAppScreen(
                                 actionType = FollowUpActionType.WHATSAPP_OPENED
                             )
                         )
+                        restoredTaskId?.let { taskId ->
+                            scope.launch {
+                                followUpTaskDao.getById(taskId)?.let { task ->
+                                    followUpTaskDao.update(
+                                        task.copy(
+                                            status = FOLLOW_UP_STATUS_WHATSAPP_OPENED,
+                                            updatedAtEpochMs = System.currentTimeMillis()
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 },
                 modifier = Modifier.weight(1f)
@@ -695,6 +805,35 @@ private fun ManualWhatsAppScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 Text("איפוס הודעה")
+            }
+        }
+
+        OutlinedButton(
+            onClick = {
+                snoozeOptionsOpen = !snoozeOptionsOpen
+                statusMessage = null
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("הזכר לי אחר כך")
+        }
+
+        if (snoozeOptionsOpen) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("בחר מועד לתזכורת", style = MaterialTheme.typography.titleSmall)
+                    SnoozeOption.entries.forEach { option ->
+                        OutlinedButton(
+                            onClick = { scheduleSnooze(option) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(option.label)
+                        }
+                    }
+                }
             }
         }
 
@@ -1186,6 +1325,11 @@ private fun callDetectionStatusAfterPermissions(
     notes += "אין שליחה אוטומטית ל-WhatsApp."
     return notes.joinToString(" ")
 }
+
+private const val FOLLOW_UP_SOURCE_MANUAL_COMPOSER = "MANUAL_COMPOSER"
+private const val FOLLOW_UP_STATUS_SNOOZED = "SNOOZED"
+private const val FOLLOW_UP_STATUS_OPENED = "OPENED"
+private const val FOLLOW_UP_STATUS_WHATSAPP_OPENED = "WHATSAPP_OPENED"
 
 private fun callMetadataLabel(callType: String?, durationSeconds: Long?): String? {
     val typeLabel = when (callType) {
