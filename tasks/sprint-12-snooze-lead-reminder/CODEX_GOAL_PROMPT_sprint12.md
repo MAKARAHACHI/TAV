@@ -89,5 +89,5 @@ When all five sub-sprints and gates pass, report:
 The full PLAN.md content follows. Treat it as approved. Begin with Sub-sprint 1 only.
 
 ---
-
-[PASTE THE ENTIRE CONTENT OF tasks/sprint-12-snooze-lead-reminder/PLAN.md HERE]
+PLAN PATH:
+F:\followup\tasks\sprint-12-snooze-lead-reminder\PLAN.md

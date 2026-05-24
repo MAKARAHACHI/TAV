@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -70,6 +71,14 @@ import com.followupnadlan.postcall.PostCallCard
 import com.followupnadlan.postcall.PostCallCards
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.setup.BatteryOptimizationIntents
+import com.followupnadlan.setup.CheckId
+import com.followupnadlan.setup.CheckState
+import com.followupnadlan.setup.OemGuidance
+import com.followupnadlan.setup.ReadinessVerdict
+import com.followupnadlan.setup.SelfTestChecker
+import com.followupnadlan.setup.SelfTestSnapshot
+import com.followupnadlan.setup.SetupPreferences
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.SprintOneTemplates
 import com.followupnadlan.templates.TemplateStore
@@ -105,8 +114,26 @@ private enum class AppScreen {
     ManualComposer,
     PostCallDecision,
     MyDetails,
-    MessageTemplates
+    MessageTemplates,
+    SetupWizard,
+    SelfTest
 }
+
+private enum class SetupWizardStep {
+    Welcome,
+    Permissions,
+    AgentProfile,
+    BatteryGuidance,
+    SelfTestHandoff
+}
+
+private data class WizardPermission(
+    val permission: String,
+    val title: String,
+    val explanation: String,
+    val optional: Boolean = false,
+    val minSdk: Int? = null
+)
 
 private data class FollowUpLaunchState(
     val phone: String = "",
@@ -153,10 +180,18 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val notificationHelper = remember(context) { FollowUpNotificationHelper(context.applicationContext) }
     val database = remember(context) { AppDatabase.getInstance(context.applicationContext) }
     val reminderScheduler = remember(context) { ReminderScheduler(context.applicationContext) }
+    val setupPreferences = remember(context) { SetupPreferences(context.applicationContext) }
+    val selfTestChecker = remember(context) { SelfTestChecker(context.applicationContext) }
     val scope = rememberCoroutineScope()
     val callDetectionPreferences = remember(context) { CallDetectionPreferences(context.applicationContext) }
     var currentScreen by remember {
-        mutableStateOf(if (initialLaunchState.openedFromNotification) AppScreen.PostCallDecision else AppScreen.ManualComposer)
+        mutableStateOf(
+            when {
+                initialLaunchState.openedFromNotification -> AppScreen.PostCallDecision
+                !setupPreferences.isSetupCompleted() -> AppScreen.SetupWizard
+                else -> AppScreen.ManualComposer
+            }
+        )
     }
     var templateRevision by remember { mutableStateOf(0) }
     var manualPhone by remember { mutableStateOf(initialLaunchState.phone) }
@@ -173,7 +208,22 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     var callDetectionStatus by remember {
         mutableStateOf(if (callDetectionEnabled) "זיהוי שיחות מסומן כפעיל במכשיר." else null)
     }
+    var pendingWizardPermission by remember { mutableStateOf<WizardPermission?>(null) }
+    var wizardPermissionStatus by remember { mutableStateOf<String?>(null) }
+    var batteryGuidanceStatus by remember { mutableStateOf<String?>(null) }
     var pendingNotificationLaunch by remember { mutableStateOf<FollowUpLaunchState?>(null) }
+    val wizardPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val permission = pendingWizardPermission
+        pendingWizardPermission = null
+        wizardPermissionStatus = when {
+            permission == null -> null
+            granted -> "${permission.title}: ההרשאה אושרה."
+            permission.optional -> "${permission.title}: ההרשאה לא אושרה. אפשר להמשיך, והשלמה אוטומטית תהיה מוגבלת."
+            else -> "${permission.title}: ההרשאה לא אושרה. מצב ידני ממשיך לעבוד."
+        }
+    }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -345,6 +395,21 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             }
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = { currentScreen = AppScreen.SetupWizard },
+                modifier = Modifier.weight(1f),
+                enabled = currentScreen != AppScreen.SetupWizard
+            ) {
+                Text("הגדרה ובדיקה")
+            }
+        }
+
         Box(modifier = Modifier.weight(1f)) {
             when (currentScreen) {
                 AppScreen.ManualComposer -> ManualWhatsAppScreen(
@@ -391,9 +456,658 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     myDetailsStore = myDetailsStore,
                     onTemplatesChanged = { templateRevision += 1 }
                 )
+                AppScreen.SetupWizard -> SetupWizardScreen(
+                    myDetailsStore = myDetailsStore,
+                    permissionStatus = wizardPermissionStatus,
+                    batteryGuidanceStatus = batteryGuidanceStatus,
+                    onRequestPermission = { permission ->
+                        if (permission.minSdk != null && Build.VERSION.SDK_INT < permission.minSdk) {
+                            wizardPermissionStatus = "${permission.title}: אין צורך בהרשאה זו בגרסת Android הנוכחית."
+                        } else if (context.checkSelfPermission(permission.permission) == PackageManager.PERMISSION_GRANTED) {
+                            wizardPermissionStatus = "${permission.title}: ההרשאה כבר מאושרת."
+                        } else {
+                            pendingWizardPermission = permission
+                            wizardPermissionStatus = "${permission.title}: בקשת הרשאה נפתחה."
+                            wizardPermissionLauncher.launch(permission.permission)
+                        }
+                    },
+                    onOpenBatterySettings = {
+                        val intent = BatteryOptimizationIntents.appSettingsIntent(context)
+                        if (intent == null) {
+                            batteryGuidanceStatus = "לא נמצאו הגדרות לפתיחה אוטומטית. פתח ידנית את הגדרות האפליקציה ובטל חיסכון סוללה אם קיים."
+                        } else {
+                            try {
+                                context.startActivity(intent)
+                                batteryGuidanceStatus = "הגדרות האפליקציה נפתחו. חפש סוללה או פעילות ברקע ואפשר פעולה ברקע."
+                            } catch (_: RuntimeException) {
+                                batteryGuidanceStatus = "לא ניתן לפתוח את ההגדרות במכשיר הזה. פתח ידנית את הגדרות האפליקציה ואפשר פעולה ברקע."
+                            }
+                        }
+                    },
+                    onStartSelfTest = { currentScreen = AppScreen.SelfTest },
+                    onFinish = {
+                        setupPreferences.setSetupCompleted(true)
+                        currentScreen = AppScreen.ManualComposer
+                    }
+                )
+                AppScreen.SelfTest -> SelfTestScreen(
+                    checker = selfTestChecker,
+                    setupPreferences = setupPreferences,
+                    onBackToWizard = { currentScreen = AppScreen.SetupWizard },
+                    onOpenNotificationSettings = {
+                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        }
+                        try {
+                            context.startActivity(intent)
+                        } catch (_: RuntimeException) {
+                            val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                            }
+                            try {
+                                context.startActivity(fallback)
+                            } catch (_: RuntimeException) {
+                                // Some OEM builds hide both notification and app-detail settings.
+                            }
+                        }
+                    },
+                    onEnableDetection = { currentScreen = AppScreen.ManualComposer },
+                    onRequestPhoneStatePermission = {
+                        val permission = WizardPermission(
+                            permission = Manifest.permission.READ_PHONE_STATE,
+                            title = "מצב טלפון",
+                            explanation = "זיהוי סוף שיחה צריך הרשאת מצב טלפון. בלי ההרשאה הזו מצב ידני ממשיך לעבוד."
+                        )
+                        pendingWizardPermission = permission
+                        wizardPermissionStatus = "${permission.title}: בקשת הרשאה נפתחה."
+                        wizardPermissionLauncher.launch(permission.permission)
+                    },
+                    onFinishSetup = {
+                        setupPreferences.setSetupCompleted(true)
+                        currentScreen = AppScreen.ManualComposer
+                    }
+                )
             }
         }
     }
+}
+
+@Composable
+private fun SetupWizardScreen(
+    myDetailsStore: MyDetailsStore,
+    permissionStatus: String?,
+    batteryGuidanceStatus: String?,
+    onRequestPermission: (WizardPermission) -> Unit,
+    onOpenBatterySettings: () -> Unit,
+    onStartSelfTest: () -> Unit,
+    onFinish: () -> Unit
+) {
+    var step by remember { mutableStateOf(SetupWizardStep.Welcome) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (step) {
+            SetupWizardStep.Welcome -> SetupWelcomeStep(
+                onContinue = { step = SetupWizardStep.Permissions }
+            )
+            SetupWizardStep.Permissions -> SetupPermissionsStep(
+                permissionStatus = permissionStatus,
+                onRequestPermission = onRequestPermission,
+                onContinue = { step = SetupWizardStep.AgentProfile }
+            )
+            SetupWizardStep.AgentProfile -> SetupAgentProfileStep(
+                store = myDetailsStore,
+                onContinue = { step = SetupWizardStep.BatteryGuidance }
+            )
+            SetupWizardStep.BatteryGuidance -> SetupBatteryGuidanceStep(
+                status = batteryGuidanceStatus,
+                onOpenBatterySettings = onOpenBatterySettings,
+                onContinue = { step = SetupWizardStep.SelfTestHandoff }
+            )
+            SetupWizardStep.SelfTestHandoff -> SetupSelfTestHandoffStep(
+                onStartSelfTest = onStartSelfTest,
+                onFinish = onFinish
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupWelcomeStep(onContinue: () -> Unit) {
+    Text(
+        text = "ברוך הבא ל-FollowUp נדלן",
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = "האפליקציה עוזרת לך לא לשכוח המשך טיפול אחרי שיחות נדלן. היא מכינה כרטיס המשך טיפול, מאפשרת הודעת WhatsApp ידנית, ושומרת מצב ידני זמין גם בלי הרשאות.",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+        Text("המשך")
+    }
+}
+
+@Composable
+private fun SetupPermissionsStep(
+    permissionStatus: String?,
+    onRequestPermission: (WizardPermission) -> Unit,
+    onContinue: () -> Unit
+) {
+    val permissions = listOf(
+        WizardPermission(
+            permission = Manifest.permission.POST_NOTIFICATIONS,
+            title = "התראות",
+            explanation = "נדרשות כדי להציג כרטיס המשך טיפול ותזכורות אחרי שיחה.",
+            minSdk = Build.VERSION_CODES.TIRAMISU
+        ),
+        WizardPermission(
+            permission = Manifest.permission.READ_PHONE_STATE,
+            title = "מצב טלפון",
+            explanation = "נדרש כדי לזהות ששיחה הסתיימה. אם לא תאשר, מצב ידני ימשיך לעבוד."
+        ),
+        WizardPermission(
+            permission = Manifest.permission.READ_CALL_LOG,
+            title = "יומן שיחות",
+            explanation = "אופציונלי: משמש רק למילוי מספר הטלפון האחרון אחרי שיחה. אפשר להמשיך בלי זה.",
+            optional = true
+        ),
+        WizardPermission(
+            permission = Manifest.permission.READ_CONTACTS,
+            title = "אנשי קשר",
+            explanation = "אופציונלי: משמש רק למילוי שם איש הקשר כשקיים. אפשר להמשיך בלי זה.",
+            optional = true
+        )
+    )
+
+    Text(
+        text = "הרשאות",
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = "כל הרשאה מוסברת לפני הבקשה. דחייה לא חוסמת את האפליקציה או את מצב השליחה הידני.",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    permissions.forEach { permission ->
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(permission.title, style = MaterialTheme.typography.titleMedium)
+                Text(permission.explanation, style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(
+                    onClick = { onRequestPermission(permission) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("בקש הרשאה")
+                }
+            }
+        }
+    }
+    permissionStatus?.let {
+        Text(text = it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth())
+    }
+    Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+        Text("המשך")
+    }
+}
+
+@Composable
+private fun SetupAgentProfileStep(
+    store: MyDetailsStore,
+    onContinue: () -> Unit
+) {
+    val savedProfile = remember(store) { store.load() }
+    var agentName by remember { mutableStateOf(savedProfile.agentName) }
+    var officeName by remember { mutableStateOf(savedProfile.officeName) }
+    var phone by remember { mutableStateOf(savedProfile.phone) }
+    var website by remember { mutableStateOf(savedProfile.website) }
+    var businessCard by remember { mutableStateOf(savedProfile.businessCard) }
+    var signature by remember { mutableStateOf(savedProfile.signature) }
+    var property1Name by remember { mutableStateOf(savedProfile.property1Name) }
+    var property1Link by remember { mutableStateOf(savedProfile.property1Link) }
+    var property2Name by remember { mutableStateOf(savedProfile.property2Name) }
+    var property2Link by remember { mutableStateOf(savedProfile.property2Link) }
+    var property3Name by remember { mutableStateOf(savedProfile.property3Name) }
+    var property3Link by remember { mutableStateOf(savedProfile.property3Link) }
+    var activePropertyIndex by remember { mutableStateOf(savedProfile.activePropertyIndex.coerceIn(1, 3)) }
+
+    Text(
+        text = "פרטי הסוכן",
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = "הפרטים נשמרים באותו מאגר מקומי של מסך הפרטים שלי. ערכים קיימים לא מתאפסים.",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = agentName,
+        onValueChange = { agentName = it },
+        label = { Text("שם הסוכן") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = officeName,
+        onValueChange = { officeName = it },
+        label = { Text("שם המשרד") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = phone,
+        onValueChange = { phone = it },
+        label = { Text("טלפון") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = website,
+        onValueChange = { website = it },
+        label = { Text("אתר") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = businessCard,
+        onValueChange = { businessCard = it },
+        label = { Text("כרטיס ביקור") },
+        minLines = 3,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = signature,
+        onValueChange = { signature = it },
+        label = { Text("חתימה") },
+        minLines = 4,
+        modifier = Modifier.fillMaxWidth()
+    )
+    PropertyFields(
+        index = 1,
+        name = property1Name,
+        link = property1Link,
+        activePropertyIndex = activePropertyIndex,
+        onNameChange = { property1Name = it },
+        onLinkChange = { property1Link = it },
+        onSelectActive = { activePropertyIndex = 1 }
+    )
+    PropertyFields(
+        index = 2,
+        name = property2Name,
+        link = property2Link,
+        activePropertyIndex = activePropertyIndex,
+        onNameChange = { property2Name = it },
+        onLinkChange = { property2Link = it },
+        onSelectActive = { activePropertyIndex = 2 }
+    )
+    PropertyFields(
+        index = 3,
+        name = property3Name,
+        link = property3Link,
+        activePropertyIndex = activePropertyIndex,
+        onNameChange = { property3Name = it },
+        onLinkChange = { property3Link = it },
+        onSelectActive = { activePropertyIndex = 3 }
+    )
+    Button(
+        onClick = {
+            store.save(
+                MyDetailsProfile(
+                    agentName = agentName,
+                    officeName = officeName,
+                    phone = phone,
+                    website = website,
+                    businessCard = businessCard,
+                    signature = signature,
+                    property1Name = property1Name,
+                    property1Link = property1Link,
+                    property2Name = property2Name,
+                    property2Link = property2Link,
+                    property3Name = property3Name,
+                    property3Link = property3Link,
+                    activePropertyIndex = activePropertyIndex
+                )
+            )
+            onContinue()
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("שמור והמשך")
+    }
+}
+
+@Composable
+private fun SetupBatteryGuidanceStep(
+    status: String?,
+    onOpenBatterySettings: () -> Unit,
+    onContinue: () -> Unit
+) {
+    val guidance = remember {
+        OemGuidance.forManufacturer("${Build.MANUFACTURER} ${Build.BRAND}".lowercase())
+    }
+
+    Text(
+        text = "הגדרות סוללה",
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = guidance.title,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = guidance.body,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedButton(onClick = onOpenBatterySettings, modifier = Modifier.fillMaxWidth()) {
+        Text("פתח הגדרות סוללה")
+    }
+    status?.let {
+        Text(text = it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth())
+    }
+    Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+        Text("המשך")
+    }
+}
+
+@Composable
+private fun SetupSelfTestHandoffStep(
+    onStartSelfTest: () -> Unit,
+    onFinish: () -> Unit
+) {
+    Text(
+        text = "כעת נבדוק שהכל עובד",
+        style = MaterialTheme.typography.headlineSmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = "במסך הבא תופיע בדיקה עצמית של הרשאות, התראות, זיהוי שיחות וחיסכון סוללה. הבדיקה לא מחייגת ולא משנה הגדרות לבד.",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Button(onClick = onStartSelfTest, modifier = Modifier.fillMaxWidth()) {
+        Text("התחל בדיקה")
+    }
+    OutlinedButton(onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
+        Text("סיים הגדרה")
+    }
+}
+
+@Composable
+private fun SelfTestScreen(
+    checker: SelfTestChecker,
+    setupPreferences: SetupPreferences,
+    onBackToWizard: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
+    onEnableDetection: () -> Unit,
+    onRequestPhoneStatePermission: () -> Unit,
+    onFinishSetup: () -> Unit
+) {
+    var snapshot by remember(checker) { mutableStateOf(checker.run()) }
+    var testStarted by remember { mutableStateOf(false) }
+    var observationMessage by remember {
+        mutableStateOf(if (setupPreferences.isSelfTestPassed()) "הבדיקה האחרונה סומנה על ידי המשתמש כהצלחה." else null)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "בדיקה עצמית",
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = readinessLabel(snapshot.verdict),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "הבדיקה קוראת מצב מכשיר והרשאות בלבד. היא לא מפעילה שירות, לא מבצעת שיחה ולא שולחת הודעה.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        snapshot.checks.forEach { (id, state) ->
+            SelfTestCheckRow(
+                id = id,
+                state = state,
+                onOpenNotificationSettings = onOpenNotificationSettings,
+                onEnableDetection = onEnableDetection,
+                onRequestPhoneStatePermission = onRequestPhoneStatePermission
+            )
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "בדיקת עבודה",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (testStarted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "חייג למספר כלשהו, נתק אחרי כמה שניות, ובדוק אם כרטיס המשך השיחה הופיע. האפליקציה לא מבצעת את השיחה בשבילך.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (testStarted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+                Button(
+                    onClick = {
+                        testStarted = true
+                        observationMessage = "התחל בדיקה ידנית: בצע שיחה קצרה מחוץ לאפליקציה וחזור לסמן מה ראית."
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("התחל בדיקה")
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            setupPreferences.setSelfTestPassed(true)
+                            observationMessage = "נרשם שהמשתמש ראה את כרטיס המשך השיחה. זו תצפית ידנית, לא זיהוי אוטומטי שנרשם ביומן."
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("זה עבד ✓")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            setupPreferences.setSelfTestPassed(false)
+                            observationMessage = troubleshootingSuggestion(snapshot)
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("זה לא עבד ✗")
+                    }
+                }
+                observationMessage?.let {
+                    Text(text = it, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        Button(
+            onClick = {
+                snapshot = checker.run()
+                observationMessage = "הבדיקה רועננה לפי מצב המכשיר הנוכחי."
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("בדוק שוב")
+        }
+
+        Text(
+            text = "אם חסרה הרשאה, מצב ידני עדיין זמין: כתיבת מספר, בחירת תבנית, פתיחת WhatsApp ידנית, שיתוף והעתקה.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedButton(onClick = onBackToWizard, modifier = Modifier.weight(1f)) {
+                Text("חזור לאשף")
+            }
+            Button(onClick = onFinishSetup, modifier = Modifier.weight(1f)) {
+                Text("סיים הגדרה")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelfTestCheckRow(
+    id: CheckId,
+    state: CheckState,
+    onOpenNotificationSettings: () -> Unit,
+    onEnableDetection: () -> Unit,
+    onRequestPhoneStatePermission: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = checkName(id),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stateLabel(state),
+                    color = stateColor(state),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            actionLine(id, state)?.let {
+                Text(text = it, style = MaterialTheme.typography.bodySmall)
+            }
+            when {
+                id == CheckId.NOTIFICATIONS && state == CheckState.FAIL -> {
+                    OutlinedButton(onClick = onOpenNotificationSettings, modifier = Modifier.fillMaxWidth()) {
+                        Text("פתח הגדרות התראות")
+                    }
+                }
+                id == CheckId.CHANNEL_ENABLED && state == CheckState.FAIL -> {
+                    OutlinedButton(onClick = onOpenNotificationSettings, modifier = Modifier.fillMaxWidth()) {
+                        Text("פתח הגדרות התראות")
+                    }
+                }
+                id == CheckId.DETECTION_ENABLED && state == CheckState.FAIL -> {
+                    OutlinedButton(onClick = onEnableDetection, modifier = Modifier.fillMaxWidth()) {
+                        Text("הפעל זיהוי שיחות")
+                    }
+                }
+                id == CheckId.PHONE_STATE && state == CheckState.FAIL -> {
+                    OutlinedButton(onClick = onRequestPhoneStatePermission, modifier = Modifier.fillMaxWidth()) {
+                        Text("בקש הרשאה")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun stateColor(state: CheckState) = when (state) {
+    CheckState.PASS -> MaterialTheme.colorScheme.primary
+    CheckState.FAIL -> MaterialTheme.colorScheme.error
+    CheckState.OPTIONAL_MISSING -> MaterialTheme.colorScheme.secondary
+    CheckState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+private fun readinessLabel(verdict: ReadinessVerdict): String = when (verdict) {
+    ReadinessVerdict.READY -> "מוכן לזיהוי שיחות"
+    ReadinessVerdict.PARTIAL -> "מצב ידני — חלק מההרשאות חסרות"
+    ReadinessVerdict.MANUAL_ONLY -> "מצב ידני בלבד"
+}
+
+private fun checkName(id: CheckId): String = when (id) {
+    CheckId.NOTIFICATIONS -> "התראות"
+    CheckId.PHONE_STATE -> "מצב טלפון"
+    CheckId.CALL_LOG -> "יומן שיחות"
+    CheckId.CONTACTS -> "אנשי קשר"
+    CheckId.DETECTION_ENABLED -> "זיהוי שיחות פעיל"
+    CheckId.CHANNEL_ENABLED -> "ערוץ התראות"
+    CheckId.BATTERY_OPTIMIZATION -> "חיסכון סוללה"
+}
+
+private fun stateLabel(state: CheckState): String = when (state) {
+    CheckState.PASS -> "עבר ✓"
+    CheckState.FAIL -> "נכשל ✗"
+    CheckState.OPTIONAL_MISSING -> "אופציונלי"
+    CheckState.UNKNOWN -> "לא ידוע"
+}
+
+private fun actionLine(id: CheckId, state: CheckState): String? = when {
+    state == CheckState.PASS -> null
+    id == CheckId.NOTIFICATIONS -> "כדי לראות כרטיס פולואפ אחרי שיחה צריך לאפשר התראות לאפליקציה."
+    id == CheckId.CHANNEL_ENABLED -> "ערוץ ההתראות כבוי. פתח את הגדרות ההתראות והפעל את ערוץ כרטיסי הפולואפ."
+    id == CheckId.PHONE_STATE -> "זיהוי סוף שיחה צריך הרשאת מצב טלפון. בלי זה אפשר להמשיך במצב ידני."
+    id == CheckId.CALL_LOG -> "יומן שיחות הוא אופציונלי. בלי ההרשאה הזו המספר לא יתמלא אוטומטית."
+    id == CheckId.CONTACTS -> "אנשי קשר הם אופציונליים. בלי ההרשאה הזו השם לא יתמלא אוטומטית."
+    id == CheckId.DETECTION_ENABLED -> "זיהוי שיחות כבוי. הפעל אותו במסך השליחה הראשי."
+    id == CheckId.BATTERY_OPTIMIZATION && state == CheckState.UNKNOWN -> "לא ניתן היה לקרוא את מצב חיסכון הסוללה במכשיר הזה."
+    id == CheckId.BATTERY_OPTIMIZATION -> "ייתכן שחיסכון סוללה מונע פעולה ברקע. פתח את שלב הסוללה באשף ובדוק החרגה לאפליקציה."
+    else -> null
+}
+
+private fun troubleshootingSuggestion(snapshot: SelfTestSnapshot): String = when {
+    snapshot.state(CheckId.PHONE_STATE) == CheckState.FAIL ->
+        "לא נרשם שהבדיקה עבדה. קודם אשר הרשאת מצב טלפון, ואז הפעל זיהוי שיחות ובדוק שוב."
+    snapshot.state(CheckId.NOTIFICATIONS) == CheckState.FAIL ||
+        snapshot.state(CheckId.CHANNEL_ENABLED) == CheckState.FAIL ->
+        "לא נרשם שהבדיקה עבדה. בדוק שההתראות וערוץ ההתראות פעילים, ואז נסה שוב."
+    snapshot.state(CheckId.DETECTION_ENABLED) == CheckState.FAIL ->
+        "לא נרשם שהבדיקה עבדה. הפעל זיהוי שיחות במסך השליחה הראשי, ואז חזור לבדיקה."
+    snapshot.state(CheckId.BATTERY_OPTIMIZATION) == CheckState.FAIL ||
+        snapshot.verdict == ReadinessVerdict.PARTIAL ->
+        "לא נרשם שהבדיקה עבדה. אם ההרשאות תקינות, חזור לשלב הסוללה ובדוק שהאפליקציה מוחרגת מחיסכון סוללה."
+    else ->
+        "לא נרשם שהבדיקה עבדה. נסה שיחה קצרה נוספת; אם עדיין אין כרטיס, בדוק את הגדרות הסוללה וההתראות במכשיר."
 }
 
 @Composable
