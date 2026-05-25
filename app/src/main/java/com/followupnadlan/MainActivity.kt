@@ -493,6 +493,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                 AppScreen.SelfTest -> SelfTestScreen(
                     checker = selfTestChecker,
                     setupPreferences = setupPreferences,
+                    myDetailsStore = myDetailsStore,
                     onBackToWizard = { currentScreen = AppScreen.SetupWizard },
                     onOpenNotificationSettings = {
                         val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
@@ -858,6 +859,7 @@ private fun SetupSelfTestHandoffStep(
 private fun SelfTestScreen(
     checker: SelfTestChecker,
     setupPreferences: SetupPreferences,
+    myDetailsStore: MyDetailsStore,
     onBackToWizard: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onEnableDetection: () -> Unit,
@@ -979,6 +981,28 @@ private fun SelfTestScreen(
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.fillMaxWidth()
         )
+        val phoneStatePassed = snapshot.checks
+            .firstOrNull { it.first == CheckId.PHONE_STATE }
+            ?.second == CheckState.PASS
+
+        val agentProfileSet = remember(checker) {
+            myDetailsStore.load().let { it.agentName.isNotBlank() && it.phone.isNotBlank() }
+        }
+
+        val canFinish = phoneStatePassed && agentProfileSet
+
+        if (!canFinish) {
+            Text(
+                text = when {
+                    !agentProfileSet -> "חסר פרופיל סוכן. חזור לאשף והשלם שם וטלפון כדי לסיים."
+                    else -> "הרשאת מצב טלפון חסרה. בלעדיה אין זיהוי שיחות — אשר אותה כדי לסיים."
+                },
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -986,7 +1010,11 @@ private fun SelfTestScreen(
             OutlinedButton(onClick = onBackToWizard, modifier = Modifier.weight(1f)) {
                 Text("חזור לאשף")
             }
-            Button(onClick = onFinishSetup, modifier = Modifier.weight(1f)) {
+            Button(
+                onClick = onFinishSetup,
+                enabled = canFinish,
+                modifier = Modifier.weight(1f)
+            ) {
                 Text("סיים הגדרה")
             }
         }
