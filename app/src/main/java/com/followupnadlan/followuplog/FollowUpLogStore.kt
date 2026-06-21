@@ -47,12 +47,14 @@ internal object FollowUpLogStorage {
     private fun encodeLine(entry: FollowUpLogEntry): String = listOf(
         entry.timestampEpochMs.toString(),
         entry.actionType.name,
-        encodeValue(messagePreview(entry.messagePreview))
+        encodeValue(messagePreview(entry.messagePreview)),
+        encodeValue(entry.phone),
+        encodeValue(entry.source)
     ).joinToString(FIELD_SEPARATOR)
 
     private fun decodeLine(line: String): FollowUpLogEntry? {
         val fields = line.split(FIELD_SEPARATOR)
-        if (fields.size != FIELD_COUNT) return null
+        if (fields.size != LEGACY_FIELD_COUNT && fields.size != FIELD_COUNT) return null
 
         val timestamp = fields[0].toLongOrNull() ?: return null
         val actionType = runCatching { FollowUpActionType.valueOf(fields[1]) }.getOrNull() ?: return null
@@ -60,7 +62,9 @@ internal object FollowUpLogStorage {
         return FollowUpLogEntry(
             actionType = actionType,
             timestampEpochMs = timestamp,
-            messagePreview = messagePreview(decodeValue(fields[2]))
+            messagePreview = messagePreview(decodeValue(fields[2])),
+            phone = fields.getOrNull(3)?.let(::decodeValue).orEmpty(),
+            source = fields.getOrNull(4)?.let(::decodeValue).orEmpty()
         )
     }
 
@@ -71,5 +75,6 @@ internal object FollowUpLogStorage {
         String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8)
 
     private const val FIELD_SEPARATOR = "|"
-    private const val FIELD_COUNT = 3
+    private const val LEGACY_FIELD_COUNT = 3
+    private const val FIELD_COUNT = 5
 }

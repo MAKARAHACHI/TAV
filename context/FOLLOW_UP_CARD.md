@@ -24,6 +24,13 @@ The card must feel like a lightweight action card, not a CRM form.
 - Manual composer.
 - Lead history item.
 
+Sprint 14 interpretation:
+
+- "Pop-out card" means an in-app Compose card opened by user action.
+- A post-call background service or receiver must not force-open the card.
+- The notification tap or foreground app state routes to the card.
+- The card writes local pipeline state only after a user-visible action.
+
 ## Default card layout
 
 ```txt
@@ -136,11 +143,24 @@ Default status:
 If user dismisses a post-call card:
 
 - Do not save lead automatically.
-- Optionally keep a temporary dismissed task for short time to avoid duplicate notifications.
+- Mark the local task `CLOSED` when the user explicitly closes/no-follows-up.
+- Cancel any future reminder for that task id.
 
 If user dismisses a snooze reminder:
 
 - Mark FollowUpTask as `DISMISSED`.
+
+## Sprint 14 pipeline actions
+
+The compact decision card supports these actions:
+
+- `Open WhatsApp`: opens `wa.me` / `ACTION_VIEW` only and marks task `WHATSAPP_OPENED` when the intent opens.
+- `Snooze`: persists the task draft/template/contact data, marks task `SNOOZED`, and schedules WorkManager by task id.
+- `Save/track`: creates or updates a local `Lead`, then marks the task `SAVED_AS_LEAD`.
+- `Close`: marks task `CLOSED` and cancels future reminders.
+- `Edit message`: opens the existing manual composer with the selected template and draft.
+
+The app never confirms that a WhatsApp message was sent; the user still presses Send inside WhatsApp.
 
 ## Anti-patterns
 

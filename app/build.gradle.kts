@@ -39,7 +39,12 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
+    }
+
+    lint {
+        disable += "ForegroundServicePermission"
     }
 }
 

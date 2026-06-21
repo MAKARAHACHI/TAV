@@ -37,8 +37,10 @@ Service active
 -> wait a short debounce delay
 -> query most recent CallLog row if permission exists
 -> apply call duration threshold
--> create FollowUpTask
 -> show notification
+-> user taps notification
+-> open in-app Follow-Up Card
+-> create or update FollowUpTask when the user chooses WhatsApp, snooze, save/track, or close
 ```
 
 ## Call duration threshold
@@ -84,6 +86,8 @@ If not:
 The engine posts notification. It does not force UI.
 
 Primary notification action opens Follow-Up Card via PendingIntent.
+
+The card may feel like a pop-out, but it is an in-app Compose surface. Do not use overlays, full-screen intents, or direct Activity launch from a service/receiver.
 
 ## Fallback mode
 

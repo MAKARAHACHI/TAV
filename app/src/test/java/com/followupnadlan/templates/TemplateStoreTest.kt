@@ -49,4 +49,12 @@ class TemplateStoreTest {
         assertEquals("Built in buyer", templates[0].body)
         assertEquals("", templates[1].body)
     }
+
+    @Test
+    fun builtInTemplatesIncludeMissedCallAutoResponse() {
+        val template = SprintOneTemplates.all.first { it.id == "missed_call_auto_response" }
+
+        assertEquals("תגובה אוטומטית לשיחה שלא נענתה", template.title)
+        assert(template.body.contains("{{businessName}}"))
+    }
 }

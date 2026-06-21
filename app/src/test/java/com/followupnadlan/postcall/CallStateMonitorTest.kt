@@ -39,6 +39,49 @@ class CallStateMonitorTest {
     }
 
     @Test
+    fun ringingToIdleTriggersMissedIncomingCall() {
+        var missedCalls = 0
+        val monitor = CallStateMonitor(
+            onCallEnded = {},
+            onMissedIncomingCall = { missedCalls += 1 }
+        )
+
+        monitor.onStateChanged(CallState.RINGING, 1_000)
+        monitor.onStateChanged(CallState.IDLE, 10_000)
+
+        assertEquals(1, missedCalls)
+    }
+
+    @Test
+    fun answeredIncomingCallDoesNotTriggerMissedIncomingCall() {
+        var missedCalls = 0
+        val monitor = CallStateMonitor(
+            onCallEnded = {},
+            onMissedIncomingCall = { missedCalls += 1 }
+        )
+
+        monitor.onStateChanged(CallState.RINGING, 1_000)
+        monitor.onStateChanged(CallState.OFFHOOK, 2_000)
+        monitor.onStateChanged(CallState.IDLE, 10_000)
+
+        assertEquals(0, missedCalls)
+    }
+
+    @Test
+    fun offhookOnlyCallDoesNotTriggerMissedIncomingCall() {
+        var missedCalls = 0
+        val monitor = CallStateMonitor(
+            onCallEnded = {},
+            onMissedIncomingCall = { missedCalls += 1 }
+        )
+
+        monitor.onStateChanged(CallState.OFFHOOK, 2_000)
+        monitor.onStateChanged(CallState.IDLE, 10_000)
+
+        assertEquals(0, missedCalls)
+    }
+
+    @Test
     fun duplicateOffhookDoesNotRestartTimer() {
         val endedDurations = mutableListOf<Long>()
         val monitor = CallStateMonitor(onCallEnded = endedDurations::add)

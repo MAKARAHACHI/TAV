@@ -312,14 +312,25 @@ enum class FollowUpSource {
 }
 
 enum class FollowUpStatus {
-  DRAFT,
+  PENDING_RESPONSE,
   OPENED,
   SNOOZED,
   WHATSAPP_OPENED,
   SAVED_AS_LEAD,
+  CLOSED,
   DISMISSED
 }
 ```
+
+Sprint 14 status vocabulary:
+
+- `PENDING_RESPONSE`: active post-call task waiting for Michael to choose the next step.
+- `OPENED`: compatibility state for an opened/restored card before the final action is chosen.
+- `SNOOZED`: active task with a WorkManager reminder scheduled by task id.
+- `WHATSAPP_OPENED`: user opened the prepared wa.me / ACTION_VIEW flow; Android does not confirm send.
+- `SAVED_AS_LEAD`: user explicitly saved/tracked the lead locally.
+- `CLOSED`: terminal user close/no-follow-up state; future reminders must be cancelled or cleared.
+- `DISMISSED`: compatibility terminal state for dismissed older reminder/card flows.
 
 ## Notification contract
 

@@ -6,8 +6,15 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
+import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
+import com.followupnadlan.missedcall.MissedCallCooldownStore
+import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
+import com.followupnadlan.missedcall.MissedCallWhatsAppMode
+import com.followupnadlan.missedcall.WhatsAppAutoSendController
+import com.followupnadlan.missedcall.WhatsAppPackageResolver
 import com.followupnadlan.notifications.FollowUpNotificationHelper
 import com.followupnadlan.postcall.CallDetectionPreferences
+import com.followupnadlan.templates.TemplateStore
 
 data class SelfTestSnapshot(
     val verdict: ReadinessVerdict,
@@ -33,9 +40,54 @@ class SelfTestChecker(private val context: Context) {
             )
         )
 
+        val missedCallSettings = MissedCallAutoResponseSettings(context)
+        val whatsappPackages = WhatsAppPackageResolver(context).resolve(missedCallSettings.preferredWhatsAppPackage)
+        val accessibilityEnabled = WhatsAppAutoSendController(context).isAccessibilityServiceEnabled()
+        val missedCallChecks = listOf(
+            CheckId.MISSED_CALL_AUTO_RESPONSE_ENABLED to if (missedCallSettings.isEnabled) {
+                CheckState.PASS
+            } else {
+                CheckState.OPTIONAL_MISSING
+            },
+            CheckId.WHATSAPP_INSTALLED to if (
+                missedCallSettings.primaryChannel == MissedCallResponsePrimaryChannel.WHATSAPP_FIRST &&
+                !whatsappPackages.anyInstalled
+            ) {
+                CheckState.FAIL
+            } else {
+                CheckState.PASS
+            },
+            CheckId.WHATSAPP_ACCESSIBILITY_SERVICE to if (
+                missedCallSettings.primaryChannel == MissedCallResponsePrimaryChannel.WHATSAPP_FIRST &&
+                missedCallSettings.whatsappMode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO &&
+                !accessibilityEnabled
+            ) {
+                CheckState.FAIL
+            } else {
+                CheckState.PASS
+            },
+            CheckId.SMS_PERMISSION to if (permissionGranted(Manifest.permission.SEND_SMS)) {
+                CheckState.PASS
+            } else if (missedCallSettings.isEnabled && missedCallSettings.primaryChannel == MissedCallResponsePrimaryChannel.SMS_ONLY) {
+                CheckState.FAIL
+            } else {
+                CheckState.OPTIONAL_MISSING
+            },
+            CheckId.MISSED_CALL_TEMPLATE to if (TemplateStore(context).loadTemplates().any { it.id == missedCallSettings.selectedTemplateId }) {
+                CheckState.PASS
+            } else {
+                CheckState.FAIL
+            },
+            CheckId.MISSED_CALL_COOLDOWN_STORE to if (MissedCallCooldownStore(context).isAccessible()) {
+                CheckState.PASS
+            } else {
+                CheckState.FAIL
+            }
+        )
+
         return SelfTestSnapshot(
             verdict = result.verdict,
-            checks = result.checks.map { it.id to it.state }
+            checks = result.checks.map { it.id to it.state } + missedCallChecks
         )
     }
 

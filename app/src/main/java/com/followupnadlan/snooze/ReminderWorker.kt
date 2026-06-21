@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.followupnadlan.data.AppDatabase
 import com.followupnadlan.notifications.ReminderNotificationHelper
+import com.followupnadlan.pipeline.FollowUpTaskStatus
 
 class ReminderWorker(
     appContext: Context,
@@ -27,7 +28,7 @@ class ReminderWorker(
             return Result.success()
         }
 
-        if (task.status != STATUS_SNOOZED) {
+        if (task.status != FollowUpTaskStatus.SNOOZED) {
             Log.i(TAG, "ReminderWorker skipped non-snoozed task")
             return Result.success()
         }
@@ -41,7 +42,6 @@ class ReminderWorker(
         const val KEY_TASK_ID = "task_id"
 
         private const val MISSING_TASK_ID = -1L
-        private const val STATUS_SNOOZED = "SNOOZED"
         private const val TAG = "ReminderWorker"
     }
 }

@@ -15,6 +15,7 @@ object TemplateTags {
         TemplateTagOption("{lead_name}", "שם הלקוח"),
         TemplateTagOption("{agent_name}", "שם הסוכן"),
         TemplateTagOption("{office_name}", "שם המשרד"),
+        TemplateTagOption("{{businessName}}", "שם העסק"),
         TemplateTagOption("{phone}", "טלפון הסוכן"),
         TemplateTagOption("{website}", "אתר"),
         TemplateTagOption("{business_card}", "כרטיס ביקור"),

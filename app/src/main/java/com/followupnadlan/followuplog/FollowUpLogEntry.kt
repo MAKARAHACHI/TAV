@@ -3,11 +3,33 @@ package com.followupnadlan.followuplog
 data class FollowUpLogEntry(
     val actionType: FollowUpActionType,
     val timestampEpochMs: Long,
-    val messagePreview: String
+    val messagePreview: String,
+    val phone: String = "",
+    val source: String = ""
 )
 
 enum class FollowUpActionType {
     WHATSAPP_OPENED,
     SHARE_OPENED,
-    COPY_USED
+    COPY_USED,
+    MISSED_CALL_DETECTED,
+    WHATSAPP_REPLY_PREPARED,
+    WHATSAPP_REPLY_OPENED,
+    WHATSAPP_REPLY_FAILED,
+    WHATSAPP_AUTO_SEND_ENABLED,
+    WHATSAPP_AUTO_SEND_DISABLED,
+    WHATSAPP_AUTO_SEND_ATTEMPTED,
+    WHATSAPP_AUTO_SENT,
+    WHATSAPP_AUTO_FAILED,
+    WHATSAPP_ACCESSIBILITY_NOT_ENABLED,
+    AUTO_SMS_SENT,
+    AUTO_SMS_FAILED,
+    FALLBACK_SMS_SENT,
+    FALLBACK_SMS_OPENED,
+    FALLBACK_SMS_FAILED,
+    AUTO_SMS_SKIPPED_NO_PERMISSION,
+    AUTO_SMS_SKIPPED_DISABLED,
+    AUTO_SMS_SKIPPED_DUPLICATE,
+    AUTO_SMS_SKIPPED_NO_NUMBER,
+    MANUAL_REPLY_OPENED
 }

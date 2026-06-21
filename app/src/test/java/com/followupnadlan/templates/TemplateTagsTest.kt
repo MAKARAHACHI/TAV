@@ -13,6 +13,7 @@ class TemplateTagsTest {
                 "{lead_name}",
                 "{agent_name}",
                 "{office_name}",
+                "{{businessName}}",
                 "{phone}",
                 "{website}",
                 "{business_card}",
@@ -31,6 +32,7 @@ class TemplateTagsTest {
         assertEquals("שם הלקוח", labelsByKey["{lead_name}"])
         assertEquals("שם הסוכן", labelsByKey["{agent_name}"])
         assertEquals("שם המשרד", labelsByKey["{office_name}"])
+        assertEquals("שם העסק", labelsByKey["{{businessName}}"])
         assertEquals("טלפון הסוכן", labelsByKey["{phone}"])
         assertEquals("אתר", labelsByKey["{website}"])
         assertEquals("כרטיס ביקור", labelsByKey["{business_card}"])

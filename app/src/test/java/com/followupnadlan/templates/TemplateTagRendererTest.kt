@@ -61,6 +61,26 @@ class TemplateTagRendererTest {
     }
 
     @Test
+    fun rendersBusinessNameTag() {
+        val rendered = TemplateTagRenderer.render(
+            "שלום, תודה שפניתם ל{{businessName}}.",
+            TemplateTagValues(businessName = "נדלן פרו")
+        )
+
+        assertEquals("שלום, תודה שפניתם לנדלן פרו.", rendered)
+    }
+
+    @Test
+    fun rendersMissedCallAutoResponseFallbackWithoutBusinessName() {
+        val rendered = TemplateTagRenderer.render(
+            "שלום, תודה שפניתם ל{{businessName}}.\nאנחנו כרגע בשטח.",
+            TemplateTagValues()
+        )
+
+        assertEquals("שלום, תודה שפניתם אלינו.\nאנחנו כרגע בשטח.", rendered)
+    }
+
+    @Test
     fun rendersRepeatedPropertyTags() {
         val rendered = TemplateTagRenderer.render(
             "{property_name} / {property_name} / {property_link}",

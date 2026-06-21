@@ -63,8 +63,25 @@ import com.followupnadlan.followuplog.FollowUpActionType
 import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
+import com.followupnadlan.missedcall.DebugMissedCallSimulationResult
+import com.followupnadlan.missedcall.DebugMissedCallSimulator
+import com.followupnadlan.missedcall.DebugMissedCallStatusFormatter
+import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
+import com.followupnadlan.missedcall.MissedCallCandidate
+import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
+import com.followupnadlan.missedcall.MissedCallDirection
+import com.followupnadlan.missedcall.MissedCallWhatsAppMode
+import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
+import com.followupnadlan.missedcall.WhatsAppAutoSendController
+import com.followupnadlan.missedcall.WhatsAppPackageResolver
+import com.followupnadlan.missedcall.WhatsAppReplySender
 import com.followupnadlan.notifications.FollowUpNotificationHelper
 import com.followupnadlan.notifications.ReminderNotificationHelper
+import com.followupnadlan.pipeline.FollowUpSource
+import com.followupnadlan.pipeline.FollowUpTaskStatus
+import com.followupnadlan.pipeline.LeadPipeline
+import com.followupnadlan.pipeline.LeadStatus
+import com.followupnadlan.pipeline.LeadType
 import com.followupnadlan.postcall.CallDetectionPreferences
 import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.postcall.PostCallCard
@@ -182,6 +199,12 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     val reminderScheduler = remember(context) { ReminderScheduler(context.applicationContext) }
     val setupPreferences = remember(context) { SetupPreferences(context.applicationContext) }
     val selfTestChecker = remember(context) { SelfTestChecker(context.applicationContext) }
+    val missedCallAutoResponseSettings = remember(context) {
+        MissedCallAutoResponseSettings(context.applicationContext)
+    }
+    val whatsAppAutoSendController = remember(context) {
+        WhatsAppAutoSendController(context.applicationContext)
+    }
     val scope = rememberCoroutineScope()
     val callDetectionPreferences = remember(context) { CallDetectionPreferences(context.applicationContext) }
     var currentScreen by remember {
@@ -198,6 +221,7 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     var manualLeadName by remember { mutableStateOf(initialLaunchState.leadName) }
     var manualTemplateId by remember { mutableStateOf(initialLaunchState.templateId) }
     var postCallDurationSeconds by remember { mutableStateOf(initialLaunchState.callDurationSeconds) }
+    var postCallTimestampMillis by remember { mutableStateOf(initialLaunchState.callTimestampMillis) }
     var postCallType by remember { mutableStateOf(initialLaunchState.callType) }
     var manualMessageOverride by remember { mutableStateOf<String?>(null) }
     var manualMessageRevision by remember { mutableStateOf(0) }
@@ -208,6 +232,34 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
     var callDetectionStatus by remember {
         mutableStateOf(if (callDetectionEnabled) "זיהוי שיחות מסומן כפעיל במכשיר." else null)
     }
+    var missedCallAutoResponseEnabled by remember {
+        mutableStateOf(missedCallAutoResponseSettings.isEnabled)
+    }
+    var missedCallPrimaryChannel by remember {
+        mutableStateOf(missedCallAutoResponseSettings.primaryChannel)
+    }
+    var missedCallWhatsAppMode by remember {
+        mutableStateOf(missedCallAutoResponseSettings.whatsappMode)
+    }
+    var missedCallSmsFallbackEnabled by remember {
+        mutableStateOf(missedCallAutoResponseSettings.smsFallbackEnabled)
+    }
+    var missedCallManualSmsFallbackEnabled by remember {
+        mutableStateOf(missedCallAutoResponseSettings.manualSmsFallbackEnabled)
+    }
+    var missedCallAutoResponseStatus by remember {
+        mutableStateOf<String?>(
+            missedCallAutoResponseStatus(
+                context = context,
+                enabled = missedCallAutoResponseEnabled,
+                primaryChannel = missedCallPrimaryChannel,
+                whatsappMode = missedCallWhatsAppMode,
+                smsFallbackEnabled = missedCallSmsFallbackEnabled,
+                accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+            )
+        )
+    }
+    var debugMissedCallStatus by remember { mutableStateOf<String?>(null) }
     var pendingWizardPermission by remember { mutableStateOf<WizardPermission?>(null) }
     var wizardPermissionStatus by remember { mutableStateOf<String?>(null) }
     var batteryGuidanceStatus by remember { mutableStateOf<String?>(null) }
@@ -240,6 +292,19 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             notificationStatus = "הרשאת התראות נדחתה. אפשר עדיין להשתמש במסך השליחה הידני."
         }
     }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            missedCallAutoResponseSettings.smsFallbackEnabled = true
+            missedCallSmsFallbackEnabled = true
+            missedCallAutoResponseStatus = "אם WhatsApp לא זמין, תישלח הודעת SMS לפי ההרשאות שאישרת."
+        } else {
+            missedCallAutoResponseSettings.smsFallbackEnabled = false
+            missedCallSmsFallbackEnabled = false
+            missedCallAutoResponseStatus = "לא ניתן לשלוח SMS אוטומטי ללא הרשאה. אפשר עדיין לפתוח הודעה מוכנה לשליחה ידנית."
+        }
+    }
     val triggerTestNotification: (String, String, String) -> Unit = { phone, leadName, templateId ->
         val launchState = FollowUpLaunchState(phone = phone, leadName = leadName, templateId = templateId)
         if (
@@ -257,6 +322,36 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             )
             notificationStatus = "ההתראה נוצרה. הקש עליה כדי לפתוח כרטיס שליחה מהיר."
         }
+    }
+    val debugMissedCallSimulator = remember(context) {
+        DebugMissedCallSimulator { candidate ->
+            MissedCallAutoResponseHandler(context.applicationContext).handleMissedIncomingCandidate(candidate)
+        }
+    }
+    val triggerDebugMissedCall: ((String) -> Unit)? = if (BuildConfig.DEBUG) {
+        { phone ->
+            val trimmedPhone = phone.trim()
+            val handler = MissedCallAutoResponseHandler(context.applicationContext)
+            debugMissedCallStatus = when (debugMissedCallSimulator.simulate(phone)) {
+                DebugMissedCallSimulationResult.TRIGGERED ->
+                    DebugMissedCallStatusFormatter.format(
+                        handler.previewMissedIncomingCandidate(
+                            MissedCallCandidate(
+                                phoneNumber = trimmedPhone,
+                                direction = MissedCallDirection.INCOMING,
+                                wasAnswered = false,
+                                source = DebugMissedCallSimulator.SOURCE
+                            )
+                        )
+                    )
+                DebugMissedCallSimulationResult.EMPTY_NUMBER ->
+                    "יש להזין מספר טלפון לבדיקה."
+                DebugMissedCallSimulationResult.RELEASE_BUILD_BLOCKED ->
+                    "הסימולטור זמין רק בגרסאות debug."
+            }
+        }
+    } else {
+        null
     }
     val startCallDetection: () -> Unit = {
         val resultMessage = startCallDetectionService(context)
@@ -322,6 +417,100 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
             }
         }
     }
+    val toggleMissedCallAutoResponse: () -> Unit = {
+        if (missedCallAutoResponseEnabled) {
+            missedCallAutoResponseSettings.isEnabled = false
+            missedCallAutoResponseEnabled = false
+            missedCallAutoResponseStatus = "כבוי — לא יישלחו הודעות אוטומטיות."
+        } else {
+            missedCallAutoResponseSettings.isEnabled = true
+            missedCallAutoResponseEnabled = true
+            missedCallAutoResponseStatus = missedCallAutoResponseStatus(
+                context = context,
+                enabled = true,
+                primaryChannel = missedCallPrimaryChannel,
+                whatsappMode = missedCallWhatsAppMode,
+                smsFallbackEnabled = missedCallSmsFallbackEnabled,
+                accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+            )
+        }
+    }
+    val keepMissedCallAutoResponseDisabled: () -> Unit = {
+        missedCallAutoResponseSettings.isEnabled = false
+        missedCallAutoResponseEnabled = false
+        missedCallAutoResponseStatus = "כבוי — לא יישלחו הודעות אוטומטיות."
+    }
+    val selectMissedCallPrimaryChannel: (MissedCallResponsePrimaryChannel) -> Unit = { channel ->
+        missedCallAutoResponseSettings.primaryChannel = channel
+        missedCallPrimaryChannel = channel
+        missedCallAutoResponseStatus = missedCallAutoResponseStatus(
+            context = context,
+            enabled = missedCallAutoResponseEnabled,
+            primaryChannel = channel,
+            whatsappMode = missedCallWhatsAppMode,
+            smsFallbackEnabled = missedCallSmsFallbackEnabled,
+            accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+        )
+    }
+    val selectMissedCallWhatsAppMode: (MissedCallWhatsAppMode) -> Unit = { mode ->
+        missedCallAutoResponseSettings.whatsappMode = mode
+        missedCallWhatsAppMode = mode
+        if (mode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO) {
+            missedCallAutoResponseSettings.whatsappAutomationEnabled = true
+            followUpLogStore.append(
+                FollowUpLogEntry(
+                    actionType = FollowUpActionType.WHATSAPP_AUTO_SEND_ENABLED,
+                    timestampEpochMs = System.currentTimeMillis(),
+                    messagePreview = "",
+                    source = MissedCallAutoResponseSettings.SOURCE
+                )
+            )
+        } else {
+            missedCallAutoResponseSettings.whatsappAutomationEnabled = false
+            followUpLogStore.append(
+                FollowUpLogEntry(
+                    actionType = FollowUpActionType.WHATSAPP_AUTO_SEND_DISABLED,
+                    timestampEpochMs = System.currentTimeMillis(),
+                    messagePreview = "",
+                    source = MissedCallAutoResponseSettings.SOURCE
+                )
+            )
+        }
+        missedCallAutoResponseStatus = missedCallAutoResponseStatus(
+            context = context,
+            enabled = missedCallAutoResponseEnabled,
+            primaryChannel = missedCallPrimaryChannel,
+            whatsappMode = mode,
+            smsFallbackEnabled = missedCallSmsFallbackEnabled,
+            accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+        )
+    }
+    val toggleMissedCallSmsFallback: () -> Unit = {
+        val next = !missedCallSmsFallbackEnabled
+        if (next && context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            missedCallAutoResponseStatus = "האפליקציה צריכה הרשאת SMS כדי לשלוח SMS רק כאשר WhatsApp לא זמין."
+            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+        } else {
+            missedCallAutoResponseSettings.smsFallbackEnabled = next
+            missedCallSmsFallbackEnabled = next
+            missedCallAutoResponseStatus = missedCallAutoResponseStatus(
+                context = context,
+                enabled = missedCallAutoResponseEnabled,
+                primaryChannel = missedCallPrimaryChannel,
+                whatsappMode = missedCallWhatsAppMode,
+                smsFallbackEnabled = next,
+                accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+            )
+        }
+    }
+    val toggleMissedCallManualSmsFallback: () -> Unit = {
+        val next = !missedCallManualSmsFallbackEnabled
+        missedCallAutoResponseSettings.manualSmsFallbackEnabled = next
+        missedCallManualSmsFallbackEnabled = next
+    }
+    val openAccessibilitySettings: () -> Unit = {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 
     LaunchedEffect(initialLaunchState.snoozedTaskId) {
         val taskId = initialLaunchState.snoozedTaskId ?: return@LaunchedEffect
@@ -337,12 +526,15 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
         manualTemplateId = task.selectedTemplateId.orEmpty()
         manualMessageOverride = task.draftText
         manualMessageRevision += 1
+        postCallDurationSeconds = task.callDurationSeconds
+        postCallTimestampMillis = task.callEndedAtEpochMs
+        postCallType = null
         restoredTaskId = task.id
-        currentScreen = AppScreen.ManualComposer
+        currentScreen = AppScreen.PostCallDecision
         notificationStatus = "תזכורת נפתחה. הכרטיס שוחזר לעריכה."
         database.followUpTaskDao().update(
             task.copy(
-                status = FOLLOW_UP_STATUS_OPENED,
+                status = FollowUpTaskStatus.OPENED,
                 updatedAtEpochMs = System.currentTimeMillis()
             )
         )
@@ -433,20 +625,51 @@ private fun FollowUpApp(initialLaunchState: FollowUpLaunchState) {
                     onTriggerTestNotification = triggerTestNotification,
                     callDetectionEnabled = callDetectionEnabled,
                     callDetectionStatus = callDetectionStatus,
-                    onToggleCallDetection = toggleCallDetection
+                    onToggleCallDetection = toggleCallDetection,
+                    missedCallAutoResponseEnabled = missedCallAutoResponseEnabled,
+                    missedCallPrimaryChannel = missedCallPrimaryChannel,
+                    missedCallWhatsAppMode = missedCallWhatsAppMode,
+                    missedCallSmsFallbackEnabled = missedCallSmsFallbackEnabled,
+                    missedCallManualSmsFallbackEnabled = missedCallManualSmsFallbackEnabled,
+                    missedCallAutoResponseStatus = missedCallAutoResponseStatus,
+                    onToggleMissedCallAutoResponse = toggleMissedCallAutoResponse,
+                    onKeepMissedCallAutoResponseDisabled = keepMissedCallAutoResponseDisabled,
+                    onSelectMissedCallPrimaryChannel = selectMissedCallPrimaryChannel,
+                    onSelectMissedCallWhatsAppMode = selectMissedCallWhatsAppMode,
+                    onToggleMissedCallSmsFallback = toggleMissedCallSmsFallback,
+                    onToggleMissedCallManualSmsFallback = toggleMissedCallManualSmsFallback,
+                    onOpenAccessibilitySettings = openAccessibilitySettings,
+                    debugSimulatorStatus = debugMissedCallStatus,
+                    onTriggerDebugMissedCall = triggerDebugMissedCall
                 )
                 AppScreen.PostCallDecision -> PostCallScreen(
                     phone = manualPhone,
                     leadName = manualLeadName,
+                    initialTemplateId = manualTemplateId,
+                    initialMessageOverride = manualMessageOverride,
                     callDurationSeconds = postCallDurationSeconds,
+                    callTimestampMillis = postCallTimestampMillis,
                     callType = postCallType,
+                    openedFromNotification = initialLaunchState.openedFromNotification,
+                    myDetailsStore = myDetailsStore,
+                    followUpLogStore = followUpLogStore,
+                    followUpTaskDao = database.followUpTaskDao(),
+                    leadDao = database.leadDao(),
+                    reminderScheduler = reminderScheduler,
+                    restoredTaskId = restoredTaskId,
+                    onRestoredTaskStatusChanged = { restoredTaskId = it },
                     selectionStatus = postCallSelectionStatus,
-                    onCardSelected = { card ->
+                    onSelectionStatusChanged = { postCallSelectionStatus = it },
+                    onEditMessage = { card, draft ->
                         manualTemplateId = card.composerHint.templateId
-                        manualMessageOverride = card.composerHint.initialMessage
+                        manualMessageOverride = draft
                         manualMessageRevision += 1
                         postCallSelectionStatus = null
                         notificationStatus = "נבחר כרטיס: ${card.title}. ההודעה הוכנה לעריכה ידנית."
+                        currentScreen = AppScreen.ManualComposer
+                    },
+                    onCloseCard = {
+                        postCallSelectionStatus = "כרטיס הפולואפ נסגר. לא תופיע תזכורת נוספת לפעולה זו."
                         currentScreen = AppScreen.ManualComposer
                     }
                 )
@@ -1101,6 +1324,12 @@ private fun checkName(id: CheckId): String = when (id) {
     CheckId.DETECTION_ENABLED -> "זיהוי שיחות פעיל"
     CheckId.CHANNEL_ENABLED -> "ערוץ התראות"
     CheckId.BATTERY_OPTIMIZATION -> "חיסכון סוללה"
+    CheckId.MISSED_CALL_AUTO_RESPONSE_ENABLED -> "תגובה אוטומטית לשיחה שלא נענתה"
+    CheckId.WHATSAPP_INSTALLED -> "WhatsApp מותקן"
+    CheckId.WHATSAPP_ACCESSIBILITY_SERVICE -> "שירות נגישות ל-WhatsApp"
+    CheckId.SMS_PERMISSION -> "הרשאת SMS"
+    CheckId.MISSED_CALL_TEMPLATE -> "תבנית תגובה אוטומטית"
+    CheckId.MISSED_CALL_COOLDOWN_STORE -> "שמירת מניעת כפילויות"
 }
 
 private fun stateLabel(state: CheckState): String = when (state) {
@@ -1120,6 +1349,12 @@ private fun actionLine(id: CheckId, state: CheckState): String? = when {
     id == CheckId.DETECTION_ENABLED -> "זיהוי שיחות כבוי. הפעל אותו במסך השליחה הראשי."
     id == CheckId.BATTERY_OPTIMIZATION && state == CheckState.UNKNOWN -> "לא ניתן היה לקרוא את מצב חיסכון הסוללה במכשיר הזה."
     id == CheckId.BATTERY_OPTIMIZATION -> "ייתכן שחיסכון סוללה מונע פעולה ברקע. פתח את שלב הסוללה באשף ובדוק החרגה לאפליקציה."
+    id == CheckId.MISSED_CALL_AUTO_RESPONSE_ENABLED -> "התגובה האוטומטית לשיחות שלא נענו כבויה. זה מצב תקין אם לא בחרת להפעיל אותה."
+    id == CheckId.WHATSAPP_INSTALLED -> "כדי להשתמש ב-WhatsApp first צריך להתקין WhatsApp או WhatsApp Business. אם אין WhatsApp, אפשר להשתמש בגיבוי SMS."
+    id == CheckId.WHATSAPP_ACCESSIBILITY_SERVICE -> "נדרש להפעיל שירות נגישות כדי לשלוח WhatsApp אוטומטית. בלי זה האפליקציה תפתח WhatsApp מוכן לשליחה ידנית."
+    id == CheckId.SMS_PERMISSION -> "האפליקציה צריכה הרשאת SMS רק עבור גיבוי SMS אוטומטי. בלי הרשאה אפשר לפתוח הודעה מוכנה לשליחה ידנית."
+    id == CheckId.MISSED_CALL_TEMPLATE -> "חסרה תבנית תגובה לשיחה שלא נענתה. בדוק את מסך התבניות."
+    id == CheckId.MISSED_CALL_COOLDOWN_STORE -> "לא ניתן לקרוא את שמירת מניעת הכפילויות המקומית."
     else -> null
 }
 
@@ -1142,11 +1377,35 @@ private fun troubleshootingSuggestion(snapshot: SelfTestSnapshot): String = when
 private fun PostCallScreen(
     phone: String,
     leadName: String,
+    initialTemplateId: String,
+    initialMessageOverride: String?,
     callDurationSeconds: Long?,
+    callTimestampMillis: Long?,
     callType: String?,
+    openedFromNotification: Boolean,
+    myDetailsStore: MyDetailsStore,
+    followUpLogStore: FollowUpLogStore,
+    followUpTaskDao: FollowUpTaskDao,
+    leadDao: LeadDao,
+    reminderScheduler: ReminderScheduler,
+    restoredTaskId: Long?,
+    onRestoredTaskStatusChanged: (Long?) -> Unit,
     selectionStatus: String?,
-    onCardSelected: (PostCallCard) -> Unit
+    onSelectionStatusChanged: (String?) -> Unit,
+    onEditMessage: (PostCallCard, String) -> Unit,
+    onCloseCard: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val myDetailsProfile = remember(myDetailsStore) { myDetailsStore.load() }
+    val initialCard = remember(initialTemplateId, initialMessageOverride) {
+        initialPostCallCard(initialTemplateId, initialMessageOverride)
+    }
+    var selectedCard by remember(initialCard) { mutableStateOf(initialCard) }
+    var selectedMessage by remember(initialCard, initialMessageOverride) {
+        mutableStateOf(initialMessageOverride ?: initialCard.composerHint.initialMessage)
+    }
+    var snoozeOptionsOpen by remember { mutableStateOf(false) }
     val baseContextLine = when {
         leadName.isNotBlank() && phone.isNotBlank() -> "שיחה עם $leadName · $phone"
         leadName.isNotBlank() -> "שיחה עם $leadName"
@@ -1158,6 +1417,82 @@ private fun PostCallScreen(
         baseContextLine
     } else {
         "$baseContextLine · $metadataLine"
+    }
+
+    val renderedMessage = TemplateTagRenderer.render(
+        selectedMessage,
+        TemplateTagValues(
+            leadName = leadName,
+            agentName = myDetailsProfile.agentName,
+            officeName = myDetailsProfile.officeName,
+            phone = myDetailsProfile.phone,
+            website = myDetailsProfile.website,
+            businessCard = myDetailsProfile.businessCard,
+            signature = myDetailsProfile.signature,
+            propertyName = activePropertyName(myDetailsProfile),
+            propertyLink = activePropertyLink(myDetailsProfile)
+        )
+    )
+    val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
+    val pipelineSource = if (openedFromNotification) {
+        FollowUpSource.POST_CALL_AUTO
+    } else {
+        FollowUpSource.MANUAL_COMPOSER
+    }
+
+    suspend fun ensureTask(card: PostCallCard): FollowUpTaskEntity {
+        fun FollowUpTaskEntity.withCurrentCardState(now: Long): FollowUpTaskEntity =
+            LeadPipeline.mergeCurrentCardState(
+                task = this,
+                phone = phone.takeIf { it.isNotBlank() },
+                contactName = leadName.takeIf { it.isNotBlank() },
+                selectedTemplateId = card.composerHint.templateId,
+                draftText = selectedMessage,
+                callEndedAtEpochMs = callTimestampMillis,
+                callDurationSeconds = callDurationSeconds,
+                leadType = null,
+                propertyLink = activePropertyLink(myDetailsProfile),
+                source = pipelineSource,
+                nowEpochMs = now
+            )
+
+        restoredTaskId?.let { taskId ->
+            followUpTaskDao.getById(taskId)?.let { task ->
+                val merged = task.withCurrentCardState(System.currentTimeMillis())
+                followUpTaskDao.update(merged)
+                return merged
+            }
+        }
+
+        val lookupPhone = phone.takeIf { it.isNotBlank() }
+        if (lookupPhone != null) {
+            followUpTaskDao.getLatestByPhoneAndStatuses(
+                phone = lookupPhone,
+                statuses = FollowUpTaskStatus.active.toList()
+            )?.let { task ->
+                val merged = task.withCurrentCardState(System.currentTimeMillis())
+                followUpTaskDao.update(merged)
+                onRestoredTaskStatusChanged(merged.id)
+                return merged
+            }
+        }
+
+        val now = System.currentTimeMillis()
+        val task = LeadPipeline.createPendingPostCallTask(
+            phone = phone.takeIf { it.isNotBlank() },
+            contactName = leadName.takeIf { it.isNotBlank() },
+            selectedTemplateId = card.composerHint.templateId,
+            draftText = selectedMessage,
+            callEndedAtEpochMs = callTimestampMillis,
+            callDurationSeconds = callDurationSeconds,
+            leadType = null,
+            propertyLink = activePropertyLink(myDetailsProfile),
+            nowEpochMs = now,
+            source = pipelineSource
+        )
+        val taskId = followUpTaskDao.insert(task)
+        onRestoredTaskStatusChanged(taskId)
+        return task.copy(id = taskId)
     }
 
     Column(
@@ -1182,7 +1517,12 @@ private fun PostCallScreen(
 
         PostCallCards.all.forEach { card ->
             Card(
-                onClick = { onCardSelected(card) },
+                onClick = {
+                    selectedCard = card
+                    selectedMessage = card.composerHint.initialMessage
+                    snoozeOptionsOpen = false
+                    onSelectionStatusChanged(null)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -1203,6 +1543,194 @@ private fun PostCallScreen(
             }
         }
 
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "הפעולה הבאה: ${selectedCard.title}",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = renderedMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        if (normalizedPhone == null || renderedMessage.isBlank()) {
+                            onSelectionStatusChanged("יש להשלים מספר תקין והודעה לפני פתיחת WhatsApp.")
+                            return@Button
+                        }
+                        scope.launch {
+                            val task = ensureTask(selectedCard)
+                            val whatsappPackages = WhatsAppPackageResolver(context).resolve("")
+                            val targetPackage = whatsappPackages.selectedPackage
+                            val controller = WhatsAppAutoSendController(context)
+                            val accessibilityEnabled = controller.isAccessibilityServiceEnabled()
+
+                            if (accessibilityEnabled && targetPackage != null) {
+                                controller.enqueuePendingSend(
+                                    phone = normalizedPhone,
+                                    message = renderedMessage,
+                                    packageName = targetPackage,
+                                    nowEpochMs = System.currentTimeMillis(),
+                                    source = "PostCallScreen"
+                                )
+                                val openResult = openWhatsApp(
+                                    context = context,
+                                    link = WhatsAppLinkBuilder.build(normalizedPhone, renderedMessage)
+                                )
+                                if (openResult == null) {
+                                    followUpTaskDao.update(
+                                        LeadPipeline.markWhatsAppOpened(
+                                            task = task,
+                                            nowEpochMs = System.currentTimeMillis()
+                                        )
+                                    )
+                                    followUpLogStore.append(
+                                        followUpLogEntry(
+                                            renderedMessage = renderedMessage,
+                                            actionType = FollowUpActionType.WHATSAPP_OPENED
+                                        )
+                                    )
+                                    onSelectionStatusChanged("WhatsApp נפתח — השירות לוחץ שליחה באופן אוטומטי.")
+                                } else {
+                                    onSelectionStatusChanged(openResult)
+                                }
+                            } else {
+                                val resultMessage = openWhatsApp(
+                                    context = context,
+                                    link = WhatsAppLinkBuilder.build(normalizedPhone, renderedMessage)
+                                )
+                                if (resultMessage == null) {
+                                    followUpTaskDao.update(
+                                        LeadPipeline.markWhatsAppOpened(
+                                            task = task,
+                                            nowEpochMs = System.currentTimeMillis()
+                                        )
+                                    )
+                                    followUpLogStore.append(
+                                        followUpLogEntry(
+                                            renderedMessage = renderedMessage,
+                                            actionType = FollowUpActionType.WHATSAPP_OPENED
+                                        )
+                                    )
+                                    onSelectionStatusChanged("WhatsApp נפתח. השליחה נשארת ידנית בתוך WhatsApp.")
+                                } else {
+                                    onSelectionStatusChanged(resultMessage)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("פתח WhatsApp")
+                }
+                OutlinedButton(
+                    onClick = {
+                        snoozeOptionsOpen = !snoozeOptionsOpen
+                        onSelectionStatusChanged(null)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("הזכר לי אחר כך")
+                }
+                if (snoozeOptionsOpen) {
+                    SnoozeOption.entries.forEach { option ->
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    val task = ensureTask(selectedCard)
+                                    val now = System.currentTimeMillis()
+                                    val reminderAt = SnoozeTimeCalculator.computeTriggerAt(
+                                        option = option,
+                                        nowMillis = now,
+                                        zoneId = ZoneId.systemDefault()
+                                    )
+                                    followUpTaskDao.update(
+                                        LeadPipeline.snoozeTask(
+                                            task = task,
+                                            reminderAtEpochMs = reminderAt,
+                                            nowEpochMs = now
+                                        )
+                                    )
+                                    reminderScheduler.schedule(task.id, reminderAt)
+                                    snoozeOptionsOpen = false
+                                    onSelectionStatusChanged("התזכורת נקבעה.")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(option.label)
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (phone.isBlank() && leadName.isBlank()) {
+                            onSelectionStatusChanged("יש להזין שם או מספר לפני שמירת ליד.")
+                            return@OutlinedButton
+                        }
+                        scope.launch {
+                            val task = ensureTask(selectedCard)
+                            val now = System.currentTimeMillis()
+                            val existingLead = task.phone
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let { leadDao.getByPhone(it) }
+                            val lead = LeadPipeline.leadFromTask(
+                                task = task,
+                                nowEpochMs = now,
+                                existingLead = existingLead
+                            )
+                            if (existingLead == null) {
+                                leadDao.insert(lead)
+                            } else {
+                                leadDao.update(lead)
+                            }
+                            followUpTaskDao.update(
+                                LeadPipeline.markSavedAsLead(
+                                    task = task,
+                                    nowEpochMs = now
+                                )
+                            )
+                            onSelectionStatusChanged("הליד נשמר למעקב מקומי.")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("שמור למעקב")
+                }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val task = ensureTask(selectedCard)
+                            followUpTaskDao.update(
+                                LeadPipeline.closeTask(
+                                    task = task,
+                                    nowEpochMs = System.currentTimeMillis()
+                                )
+                            )
+                            reminderScheduler.cancel(task.id)
+                            onRestoredTaskStatusChanged(null)
+                            onCloseCard()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("סגור ללא פולואפ")
+                }
+                OutlinedButton(
+                    onClick = { onEditMessage(selectedCard, selectedMessage) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("ערוך הודעה")
+                }
+            }
+        }
+
         selectionStatus?.let {
             Text(
                 text = it,
@@ -1212,6 +1740,203 @@ private fun PostCallScreen(
         }
     }
 }
+
+@Composable
+private fun MissedCallAutoResponseSettingsCard(
+    enabled: Boolean,
+    primaryChannel: MissedCallResponsePrimaryChannel,
+    whatsappMode: MissedCallWhatsAppMode,
+    smsFallbackEnabled: Boolean,
+    manualSmsFallbackEnabled: Boolean,
+    status: String?,
+    onToggle: () -> Unit,
+    onCancel: () -> Unit,
+    onSelectPrimaryChannel: (MissedCallResponsePrimaryChannel) -> Unit,
+    onSelectWhatsAppMode: (MissedCallWhatsAppMode) -> Unit,
+    onToggleSmsFallback: () -> Unit,
+    onToggleManualSmsFallback: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit
+) {
+    val context = LocalContext.current
+    val whatsappPackages = remember(context) {
+        WhatsAppPackageResolver(context).resolve(preferredPackage = "")
+    }
+    val accessibilityEnabled = remember(context, whatsappMode) {
+        WhatsAppAutoSendController(context).isAccessibilityServiceEnabled()
+    }
+    val smsPermissionGranted =
+        context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+    val whatsappPreparedReplyAvailable =
+        primaryChannel == MissedCallResponsePrimaryChannel.WHATSAPP_FIRST && whatsappPackages.anyInstalled
+    val whatsappAutoSendUserEnabled = whatsappMode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("תגובה לשיחה שלא נענתה", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "כאשר שיחה נכנסת לא נענית, האפליקציה מכינה תגובה עסקית מיידית. WhatsApp הוא הערוץ הראשי, ו-SMS משמש רק כגיבוי.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            status?.let {
+                Text(text = it, color = MaterialTheme.colorScheme.primary)
+            }
+            AutoResponseReadinessStatusSection(
+                responseActive = enabled,
+                primaryChannel = primaryChannel,
+                whatsappInstalled = whatsappPackages.messengerInstalled,
+                whatsappBusinessInstalled = whatsappPackages.businessInstalled,
+                whatsappPreparedReplyAvailable = whatsappPreparedReplyAvailable,
+                whatsappAutoSendActive = whatsappAutoSendUserEnabled && accessibilityEnabled,
+                accessibilityEnabled = accessibilityEnabled,
+                whatsappAutoSendUserEnabled = whatsappAutoSendUserEnabled,
+                smsFallbackEnabled = smsFallbackEnabled,
+                smsPermissionGranted = smsPermissionGranted
+            )
+            Text(
+                text = if (enabled) "פעיל" else "כבוי",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+            )
+            Button(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
+                Text(if (enabled) "כבה תגובה אוטומטית" else "הפעל תגובה אוטומטית")
+            }
+            if (!enabled) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                    Text("לא עכשיו")
+                }
+            }
+
+            Text("ערוץ ראשי", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { onSelectPrimaryChannel(MissedCallResponsePrimaryChannel.WHATSAPP_FIRST) },
+                    enabled = primaryChannel != MissedCallResponsePrimaryChannel.WHATSAPP_FIRST,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("WhatsApp first")
+                }
+                Button(
+                    onClick = { onSelectPrimaryChannel(MissedCallResponsePrimaryChannel.SMS_ONLY) },
+                    enabled = primaryChannel != MissedCallResponsePrimaryChannel.SMS_ONLY,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("SMS only")
+                }
+            }
+
+            Text("מצב WhatsApp", style = MaterialTheme.typography.titleSmall)
+            OutlinedButton(
+                onClick = { onSelectWhatsAppMode(MissedCallWhatsAppMode.PREPARED_MANUAL) },
+                enabled = whatsappMode != MissedCallWhatsAppMode.PREPARED_MANUAL,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("פתיחת WhatsApp מוכן לשליחה")
+            }
+            OutlinedButton(
+                onClick = { onSelectWhatsAppMode(MissedCallWhatsAppMode.ACCESSIBILITY_AUTO) },
+                enabled = whatsappMode != MissedCallWhatsAppMode.ACCESSIBILITY_AUTO,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("שליחה אוטומטית ב-WhatsApp באמצעות נגישות")
+            }
+
+            if (whatsappMode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("שליחה אוטומטית ב-WhatsApp", style = MaterialTheme.typography.titleSmall)
+                    Text("האפליקציה יכולה לפתוח את WhatsApp ולשלוח הודעה אוטומטית לשיחה שלא נענתה.")
+                    Text("הפעולה תתבצע רק לאחר שתפעיל את האפשרות ותאשר שירות נגישות.")
+                    Text("השימוש מיועד רק לתגובה לשיחה שלא נענתה, לפי תבנית שאתה קובע מראש.")
+                    Text("אפשר לכבות את האפשרות בכל רגע.")
+                    Button(onClick = onOpenAccessibilitySettings, modifier = Modifier.fillMaxWidth()) {
+                        Text("הפעל שליחה אוטומטית ב-WhatsApp")
+                    }
+                    OutlinedButton(
+                        onClick = { onSelectWhatsAppMode(MissedCallWhatsAppMode.PREPARED_MANUAL) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("פתח WhatsApp מוכן לשליחה ידנית")
+                    }
+                }
+            }
+
+            Text("גיבוי", style = MaterialTheme.typography.titleSmall)
+            OutlinedButton(onClick = onToggleSmsFallback, modifier = Modifier.fillMaxWidth()) {
+                Text(if (smsFallbackEnabled) "כבה SMS אם WhatsApp לא זמין" else "שלח SMS אם WhatsApp לא זמין")
+            }
+            OutlinedButton(onClick = onToggleManualSmsFallback, modifier = Modifier.fillMaxWidth()) {
+                Text(if (manualSmsFallbackEnabled) "כבה SMS מוכן ללא הרשאה" else "פתח SMS מוכן אם אין הרשאת שליחה אוטומטית")
+            }
+            Text(
+                "ברירת המחדל היא 6 שעות קירור לכל מספר. לא נשלחת גם הודעת WhatsApp וגם SMS אלא אם הערוץ הקודם נכשל.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutoResponseReadinessStatusSection(
+    responseActive: Boolean,
+    primaryChannel: MissedCallResponsePrimaryChannel,
+    whatsappInstalled: Boolean,
+    whatsappBusinessInstalled: Boolean,
+    whatsappPreparedReplyAvailable: Boolean,
+    whatsappAutoSendActive: Boolean,
+    accessibilityEnabled: Boolean,
+    whatsappAutoSendUserEnabled: Boolean,
+    smsFallbackEnabled: Boolean,
+    smsPermissionGranted: Boolean
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("בדיקת מוכנות לתגובה אוטומטית", style = MaterialTheme.typography.titleSmall)
+        ReadinessStatusLine("תגובה לשיחה שלא נענתה", if (responseActive) "פעילה" else "כבויה")
+        ReadinessStatusLine(
+            "ערוץ ראשי",
+            if (primaryChannel == MissedCallResponsePrimaryChannel.WHATSAPP_FIRST) "WhatsApp תחילה" else "SMS בלבד"
+        )
+        ReadinessStatusLine("WhatsApp מותקן", yesNo(whatsappInstalled))
+        ReadinessStatusLine("WhatsApp Business מותקן", yesNo(whatsappBusinessInstalled))
+        ReadinessStatusLine("הודעת WhatsApp מוכנה לשליחה ידנית", yesNo(whatsappPreparedReplyAvailable))
+        ReadinessStatusLine("שליחה אוטומטית ב-WhatsApp", if (whatsappAutoSendActive) "פעילה" else "לא פעילה")
+        ReadinessStatusLine("שירות נגישות", if (accessibilityEnabled) "פעיל" else "נדרש להפעיל")
+        ReadinessStatusLine("שליחה אוטומטית הופעלה על ידי המשתמש", yesNo(whatsappAutoSendUserEnabled))
+        ReadinessStatusLine("גיבוי SMS", if (smsFallbackEnabled) "פעיל" else "כבוי")
+        ReadinessStatusLine("הרשאת SMS", if (smsPermissionGranted) "קיימת" else "חסרה")
+        ReadinessStatusLine("הגנת כפילויות", "פעילה")
+        if (whatsappAutoSendUserEnabled && !accessibilityEnabled) {
+            Text(
+                "כדי לשלוח WhatsApp אוטומטית, יש להפעיל את שירות הנגישות של האפליקציה.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+        if (smsFallbackEnabled && !smsPermissionGranted) {
+            Text(
+                "אם WhatsApp לא זמין, לא ניתן לשלוח SMS אוטומטי ללא הרשאה. אפשר עדיין לפתוח הודעה מוכנה לשליחה ידנית.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReadinessStatusLine(label: String, value: String) {
+    Text("$label: $value", style = MaterialTheme.typography.bodySmall)
+}
+
+private fun yesNo(value: Boolean): String = if (value) "כן" else "לא"
 
 @Composable
 private fun ManualWhatsAppScreen(
@@ -1235,7 +1960,22 @@ private fun ManualWhatsAppScreen(
     onTriggerTestNotification: (phone: String, leadName: String, templateId: String) -> Unit,
     callDetectionEnabled: Boolean,
     callDetectionStatus: String?,
-    onToggleCallDetection: () -> Unit
+    onToggleCallDetection: () -> Unit,
+    missedCallAutoResponseEnabled: Boolean,
+    missedCallPrimaryChannel: MissedCallResponsePrimaryChannel,
+    missedCallWhatsAppMode: MissedCallWhatsAppMode,
+    missedCallSmsFallbackEnabled: Boolean,
+    missedCallManualSmsFallbackEnabled: Boolean,
+    missedCallAutoResponseStatus: String?,
+    onToggleMissedCallAutoResponse: () -> Unit,
+    onKeepMissedCallAutoResponseDisabled: () -> Unit,
+    onSelectMissedCallPrimaryChannel: (MissedCallResponsePrimaryChannel) -> Unit,
+    onSelectMissedCallWhatsAppMode: (MissedCallWhatsAppMode) -> Unit,
+    onToggleMissedCallSmsFallback: () -> Unit,
+    onToggleMissedCallManualSmsFallback: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    debugSimulatorStatus: String?,
+    onTriggerDebugMissedCall: ((String) -> Unit)?
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1253,6 +1993,7 @@ private fun ManualWhatsAppScreen(
     var snoozeOptionsOpen by remember { mutableStateOf(false) }
     var phoneValidationRequested by remember { mutableStateOf(false) }
     var messageValidationRequested by remember { mutableStateOf(false) }
+    var debugMissedCallPhone by remember { mutableStateOf("0501234567") }
 
     val renderedMessage = TemplateTagRenderer.render(
         message,
@@ -1295,13 +2036,13 @@ private fun ManualWhatsAppScreen(
             contactName = leadName,
             callEndedAtEpochMs = null,
             callDurationSeconds = null,
-            source = FOLLOW_UP_SOURCE_MANUAL_COMPOSER,
+            source = FollowUpSource.MANUAL_COMPOSER,
             selectedTemplateId = selectedTemplate.id,
             draftText = message,
             leadType = null,
             propertyLink = activePropertyLink(myDetailsProfile),
             reminderAtEpochMs = reminderAt,
-            status = FOLLOW_UP_STATUS_SNOOZED,
+            status = FollowUpTaskStatus.SNOOZED,
             createdAtEpochMs = now,
             updatedAtEpochMs = now
         )
@@ -1333,8 +2074,8 @@ private fun ManualWhatsAppScreen(
                 LeadEntity(
                     fullName = leadName.takeIf { it.isNotBlank() },
                     phone = phone,
-                    type = LEAD_TYPE_UNKNOWN,
-                    status = LEAD_STATUS_NEW,
+                    type = LeadType.UNKNOWN,
+                    status = LeadStatus.NEW,
                     notes = null,
                     lastCallAtEpochMs = null,
                     lastFollowUpAtEpochMs = now,
@@ -1346,7 +2087,7 @@ private fun ManualWhatsAppScreen(
                 followUpTaskDao.getById(taskId)?.let { task ->
                     followUpTaskDao.update(
                         task.copy(
-                            status = FOLLOW_UP_STATUS_SAVED_AS_LEAD,
+                            status = FollowUpTaskStatus.SAVED_AS_LEAD,
                             updatedAtEpochMs = System.currentTimeMillis()
                         )
                     )
@@ -1393,6 +2134,32 @@ private fun ManualWhatsAppScreen(
         }
         callDetectionStatus?.let {
             Text(text = it, color = MaterialTheme.colorScheme.primary)
+        }
+
+        MissedCallAutoResponseSettingsCard(
+            enabled = missedCallAutoResponseEnabled,
+            primaryChannel = missedCallPrimaryChannel,
+            whatsappMode = missedCallWhatsAppMode,
+            smsFallbackEnabled = missedCallSmsFallbackEnabled,
+            manualSmsFallbackEnabled = missedCallManualSmsFallbackEnabled,
+            status = missedCallAutoResponseStatus,
+            onToggle = onToggleMissedCallAutoResponse,
+            onCancel = onKeepMissedCallAutoResponseDisabled,
+            onSelectPrimaryChannel = onSelectMissedCallPrimaryChannel,
+            onSelectWhatsAppMode = onSelectMissedCallWhatsAppMode,
+            onToggleSmsFallback = onToggleMissedCallSmsFallback,
+            onToggleManualSmsFallback = onToggleMissedCallManualSmsFallback,
+            onOpenAccessibilitySettings = onOpenAccessibilitySettings
+        )
+        if (BuildConfig.DEBUG && onTriggerDebugMissedCall != null) {
+            DebugMissedCallSimulatorCard(
+                phone = debugMissedCallPhone,
+                status = debugSimulatorStatus,
+                onPhoneChange = {
+                    debugMissedCallPhone = it
+                },
+                onTrigger = onTriggerDebugMissedCall
+            )
         }
 
         OutlinedTextField(
@@ -1502,6 +2269,21 @@ private fun ManualWhatsAppScreen(
                         statusMessage = "יש להשלים את השדות המסומנים לפני פתיחת WhatsApp."
                         return@Button
                     }
+                    val whatsappPackages = WhatsAppPackageResolver(context).resolve("")
+                    val targetPackage = whatsappPackages.selectedPackage
+                    val controller = WhatsAppAutoSendController(context)
+                    val accessibilityEnabled = controller.isAccessibilityServiceEnabled()
+
+                    if (accessibilityEnabled && targetPackage != null) {
+                        controller.enqueuePendingSend(
+                            phone = currentPhone,
+                            message = renderedMessage,
+                            packageName = targetPackage,
+                            nowEpochMs = System.currentTimeMillis(),
+                            source = "ManualComposer"
+                        )
+                    }
+
                     val resultMessage = openWhatsApp(context, WhatsAppLinkBuilder.build(currentPhone, renderedMessage))
                     statusMessage = resultMessage
                     if (resultMessage == null) {
@@ -1511,12 +2293,17 @@ private fun ManualWhatsAppScreen(
                                 actionType = FollowUpActionType.WHATSAPP_OPENED
                             )
                         )
+                        if (accessibilityEnabled && targetPackage != null) {
+                            statusMessage = "WhatsApp נפתח — השירות לוחץ שליחה באופן אוטומטי."
+                        } else {
+                            statusMessage = "WhatsApp נפתח. השליחה נשארת ידנית בתוך WhatsApp."
+                        }
                         restoredTaskId?.let { taskId ->
                             scope.launch {
                                 followUpTaskDao.getById(taskId)?.let { task ->
                                     followUpTaskDao.update(
                                         task.copy(
-                                            status = FOLLOW_UP_STATUS_WHATSAPP_OPENED,
+                                            status = FollowUpTaskStatus.WHATSAPP_OPENED,
                                             updatedAtEpochMs = System.currentTimeMillis()
                                         )
                                     )
@@ -1629,6 +2416,44 @@ private fun ManualWhatsAppScreen(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun DebugMissedCallSimulatorCard(
+    phone: String,
+    status: String?,
+    onPhoneChange: (String) -> Unit,
+    onTrigger: (String) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("בדיקת שיחה שלא נענתה", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "מצב בדיקה בלבד. האירוע נשלח דרך אותו מטפל של שיחה שלא נענתה, בלי לעקוף את החלטות ה-WhatsApp, ה-SMS או ה-cooldown.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            OutlinedTextField(
+                value = phone,
+                onValueChange = onPhoneChange,
+                label = { Text("מספר טלפון לבדיקה") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                onClick = { onTrigger(phone) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("הפעל בדיקת שיחה שלא נענתה")
+            }
+            status?.let {
+                Text(text = it, color = MaterialTheme.colorScheme.primary)
+            }
+        }
     }
 }
 
@@ -2094,6 +2919,16 @@ private fun activePropertyLink(profile: MyDetailsProfile): String = when (profil
 
 private fun defaultMessageFor(template: MessageTemplate): String = template.body
 
+private fun initialPostCallCard(
+    templateId: String,
+    draftText: String?
+): PostCallCard =
+    PostCallCards.all.firstOrNull { card ->
+        card.composerHint.templateId == templateId && draftText == card.composerHint.initialMessage
+    } ?: PostCallCards.all.firstOrNull { card ->
+        card.composerHint.templateId == templateId
+    } ?: PostCallCards.all.first()
+
 private fun callDetectionStatusAfterPermissions(
     notificationsGranted: Boolean,
     callLogGranted: Boolean,
@@ -2113,13 +2948,31 @@ private fun callDetectionStatusAfterPermissions(
     return notes.joinToString(" ")
 }
 
-private const val FOLLOW_UP_SOURCE_MANUAL_COMPOSER = "MANUAL_COMPOSER"
-private const val FOLLOW_UP_STATUS_SNOOZED = "SNOOZED"
-private const val FOLLOW_UP_STATUS_OPENED = "OPENED"
-private const val FOLLOW_UP_STATUS_WHATSAPP_OPENED = "WHATSAPP_OPENED"
-private const val FOLLOW_UP_STATUS_SAVED_AS_LEAD = "SAVED_AS_LEAD"
-private const val LEAD_TYPE_UNKNOWN = "UNKNOWN"
-private const val LEAD_STATUS_NEW = "NEW"
+private fun missedCallAutoResponseStatus(
+    context: Context,
+    enabled: Boolean,
+    primaryChannel: MissedCallResponsePrimaryChannel,
+    whatsappMode: MissedCallWhatsAppMode,
+    smsFallbackEnabled: Boolean,
+    accessibilityEnabled: Boolean
+): String =
+    when {
+        !enabled ->
+            "כבוי — לא יישלחו הודעות אוטומטיות."
+        primaryChannel == MissedCallResponsePrimaryChannel.SMS_ONLY &&
+            context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED ->
+            "פעיל — שיחה שלא נענתה תישלח ב-SMS בלבד."
+        primaryChannel == MissedCallResponsePrimaryChannel.SMS_ONLY ->
+            "נדרשת הרשאת SMS כדי לשלוח SMS אוטומטי."
+        whatsappMode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO && !accessibilityEnabled ->
+            "נדרש להפעיל שירות נגישות כדי לשלוח WhatsApp אוטומטית."
+        whatsappMode == MissedCallWhatsAppMode.ACCESSIBILITY_AUTO ->
+            "פעיל — שיחה שלא נענתה תישלח אוטומטית ב-WhatsApp באמצעות שירות נגישות."
+        smsFallbackEnabled ->
+            "פעיל — שיחה שלא נענתה תפתח WhatsApp עם הודעה מוכנה. אם WhatsApp לא זמין, תישלח הודעת SMS לפי ההרשאות שאישרת."
+        else ->
+            "פעיל — שיחה שלא נענתה תפתח WhatsApp עם הודעה מוכנה."
+    }
 
 private fun callMetadataLabel(callType: String?, durationSeconds: Long?): String? {
     val typeLabel = when (callType) {

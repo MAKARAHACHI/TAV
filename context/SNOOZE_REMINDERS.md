@@ -88,13 +88,23 @@ If no name:
 ## Status transitions
 
 ```txt
-DRAFT -> SNOOZED
+PENDING_RESPONSE -> SNOOZED
 SNOOZED -> OPENED
-SNOOZED -> DISMISSED
 OPENED -> WHATSAPP_OPENED
 OPENED -> SNOOZED
 OPENED -> SAVED_AS_LEAD
+OPENED -> CLOSED
+SNOOZED -> CLOSED
+SNOOZED -> DISMISSED
 ```
+
+`DRAFT` is an older planning word. Sprint 14 uses `PENDING_RESPONSE` for active post-call tasks waiting for a user decision.
+
+Reminder identity rule:
+
+- WorkManager unique work name is based on `taskId`.
+- Resnoozing a restored card must update the same task id.
+- Closing a task cancels the same task id's reminder work.
 
 ## Edge cases
 
@@ -109,6 +119,10 @@ Save final draft text and selected template ID.
 ### User opens WhatsApp after snooze
 
 Mark task `WHATSAPP_OPENED`.
+
+### User closes restored reminder
+
+Mark task `CLOSED`, clear future reminder state, and cancel WorkManager by task id.
 
 ### App is rebooted
 

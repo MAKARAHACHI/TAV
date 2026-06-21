@@ -18,6 +18,7 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import com.followupnadlan.MainActivity
 import com.followupnadlan.R
+import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
 import com.followupnadlan.notifications.FollowUpNotificationHelper
 
 class CallDetectionService : Service() {
@@ -33,6 +34,9 @@ class CallDetectionService : Service() {
             minCallDurationSeconds = preferences.minCallDurationSeconds.toLong(),
             onCallEnded = {
                 postFollowUpNotificationAfterCallEnd()
+            },
+            onMissedIncomingCall = {
+                handleMissedIncomingCall()
             }
         )
         startStatusNotification()
@@ -64,6 +68,15 @@ class CallDetectionService : Service() {
                     callTimestampMillis = latestCall?.timestampMillis,
                     callType = latestCall?.type?.toNotificationExtra()
                 )
+            },
+            CALL_LOG_READ_DELAY_MILLIS
+        )
+    }
+
+    private fun handleMissedIncomingCall() {
+        mainHandler.postDelayed(
+            {
+                MissedCallAutoResponseHandler(applicationContext).handleMissedIncomingCandidate()
             },
             CALL_LOG_READ_DELAY_MILLIS
         )

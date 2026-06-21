@@ -4,6 +4,7 @@ data class TemplateTagValues(
     val leadName: String = "",
     val agentName: String = "",
     val officeName: String = "",
+    val businessName: String = "",
     val phone: String = "",
     val website: String = "",
     val businessCard: String = "",
@@ -14,10 +15,21 @@ data class TemplateTagValues(
 
 object TemplateTagRenderer {
     fun render(template: String, values: TemplateTagValues): String {
+        val businessName = values.businessName.ifBlank { values.officeName }
+        val templateWithBusinessFallback = if (businessName.isBlank()) {
+            template.replace(
+                "שלום, תודה שפניתם ל{{businessName}}.",
+                "שלום, תודה שפניתם אלינו."
+            )
+        } else {
+            template
+        }
         val replacements = mapOf(
             "{lead_name}" to values.leadName,
             "{agent_name}" to values.agentName,
             "{office_name}" to values.officeName,
+            "{business_name}" to businessName,
+            "{{businessName}}" to businessName,
             "{phone}" to values.phone,
             "{website}" to values.website,
             "{business_card}" to values.businessCard,
@@ -26,7 +38,7 @@ object TemplateTagRenderer {
             "{property_link}" to values.propertyLink
         )
 
-        return replacements.entries.fold(template) { rendered, (tag, value) ->
+        return replacements.entries.fold(templateWithBusinessFallback) { rendered, (tag, value) ->
             rendered.replace(tag, value)
         }
     }

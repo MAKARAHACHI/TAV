@@ -2,7 +2,8 @@ package com.followupnadlan.postcall
 
 class CallStateMonitor(
     private val minCallDurationSeconds: Long = DEFAULT_MIN_CALL_DURATION_SECONDS,
-    private val onCallEnded: (durationSeconds: Long) -> Unit
+    private val onCallEnded: (durationSeconds: Long) -> Unit,
+    private val onMissedIncomingCall: () -> Unit = {}
 ) {
     enum class CallState {
         IDLE,
@@ -12,6 +13,8 @@ class CallStateMonitor(
 
     private var lastState: CallState = CallState.IDLE
     private var offhookStartedAtMillis: Long? = null
+    private var incomingRang = false
+    private var answeredDuringCurrentCall = false
 
     fun onStateChanged(newState: CallState, nowMillis: Long) {
         if (newState == lastState) return
@@ -22,6 +25,7 @@ class CallStateMonitor(
         when (newState) {
             CallState.OFFHOOK -> {
                 offhookStartedAtMillis = nowMillis
+                answeredDuringCurrentCall = true
             }
             CallState.IDLE -> {
                 val startedAt = offhookStartedAtMillis
@@ -32,8 +36,16 @@ class CallStateMonitor(
                         onCallEnded(durationSeconds)
                     }
                 }
+                if (incomingRang && !answeredDuringCurrentCall) {
+                    onMissedIncomingCall()
+                }
+                incomingRang = false
+                answeredDuringCurrentCall = false
             }
-            CallState.RINGING -> Unit
+            CallState.RINGING -> {
+                incomingRang = true
+                answeredDuringCurrentCall = false
+            }
         }
     }
 
