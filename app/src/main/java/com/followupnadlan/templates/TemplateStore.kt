@@ -5,13 +5,26 @@ import android.content.Context
 class TemplateStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun loadTemplates(builtInTemplates: List<MessageTemplate> = SprintOneTemplates.all): List<MessageTemplate> =
-        TemplateStoreLogic.applySavedBodies(
+    fun loadTemplates(builtInTemplates: List<MessageTemplate> = SprintOneTemplates.all): List<MessageTemplate> {
+        // Drop any legacy Nadlan/business saved bodies so the accessibility default shows.
+        // User-customized accessibility bodies are kept (see LegacyTemplateMigration).
+        cleanLegacySavedBodies(builtInTemplates)
+        return TemplateStoreLogic.applySavedBodies(
             builtInTemplates = builtInTemplates,
             savedBodiesById = builtInTemplates.associate { template ->
                 template.id to preferences.getString(bodyKey(template.id), null)
             }
         )
+    }
+
+    private fun cleanLegacySavedBodies(builtInTemplates: List<MessageTemplate>) {
+        builtInTemplates.forEach { template ->
+            val saved = preferences.getString(bodyKey(template.id), null)
+            if (LegacyTemplateMigration.isLegacyDefaultBody(saved)) {
+                preferences.edit().remove(bodyKey(template.id)).apply()
+            }
+        }
+    }
 
     fun saveTemplate(template: MessageTemplate) {
         preferences.edit()

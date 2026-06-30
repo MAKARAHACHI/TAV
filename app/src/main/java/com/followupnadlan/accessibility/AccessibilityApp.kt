@@ -44,6 +44,7 @@ import com.followupnadlan.missedcall.MissedCallWhatsAppMode
 import com.followupnadlan.missedcall.WhatsAppPackageResolver
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageTemplate
+import com.followupnadlan.templates.SprintOneTemplates
 import com.followupnadlan.templates.TemplateStore
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
@@ -384,9 +385,9 @@ private fun SetupConsentScreen(onEnable: () -> Unit, onDismiss: () -> Unit) {
 private data class TemplateChoice(val id: String, val title: String, val subtitle: String)
 
 private val TEMPLATE_CHOICES = listOf(
-    TemplateChoice("missed_call_auto_response", "אני חירש/ת או כבד/ת שמיעה...", "אנא כתבו לי כאן בכתב, תודה."),
-    TemplateChoice("missed_call", "קשה לי לענות לשיחות קוליות...", "אשמח אם תכתבו לי הודעה."),
-    TemplateChoice("buyer_property_details", "אני מעדיף/ה תקשורת בכתב...", "תודה על ההבנה.")
+    TemplateChoice(SprintOneTemplates.OPEN_ID, "גלוי", "אני חירש/ת או כבד/ת שמיעה — אפשר לכתוב לי ב־WhatsApp או ב־SMS."),
+    TemplateChoice(SprintOneTemplates.GENTLE_ID, "עדין", "קשה לי לענות לשיחות קוליות — אפשר בבקשה לכתוב לי?"),
+    TemplateChoice(SprintOneTemplates.PRIVATE_ID, "פרטי", "אני מעדיף/ה תקשורת בכתב — אפשר לכתוב לי כאן.")
 )
 
 @Composable

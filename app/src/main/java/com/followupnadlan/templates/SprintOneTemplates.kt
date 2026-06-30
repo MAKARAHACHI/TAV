@@ -1,45 +1,47 @@
 package com.followupnadlan.templates
 
+/**
+ * Default missed-call message templates for the "אני זמין/ה בכתב" accessibility app.
+ *
+ * These are the only user-visible default messages. They contain no business /
+ * real-estate copy and no template tags — the text is sent as-is. Legacy
+ * Nadlan/business templates were removed; see [LegacyTemplateMigration] for how
+ * older installs are migrated to these.
+ */
 object SprintOneTemplates {
-    val all = listOf(
-        MessageTemplate(
-            id = "buyer_property_details",
-            title = "שליחת פרטי נכס",
-            body = """
-                שלום,
-                שמחתי לדבר איתך לגבי הדירה.
-                מצרף כאן את הפרטים שדיברנו עליהם:
+    const val OPEN_ID = "accessibility_open"
+    const val GENTLE_ID = "accessibility_gentle"
+    const val PRIVATE_ID = "accessibility_private"
 
-                אשמח לתאם סיור בזמן שנוח לך.
-            """.trimIndent()
-        ),
-        MessageTemplate(
-            id = "seller_valuation",
-            title = "תיאום הערכת נכס",
-            body = """
-                שלום,
-                שמחתי לדבר איתך לגבי הנכס.
-                אשמח לתאם פגישה קצרה, להבין את הפרטים, ולהסביר איך אפשר להתקדם בצורה מסודרת.
-            """.trimIndent()
-        ),
-        MessageTemplate(
-            id = "missed_call",
-            title = "חזרה לשיחה שלא נענתה",
-            body = """
-                שלום,
-                ראיתי שפספסתי את השיחה שלך.
-                אפשר לכתוב לי כאן במה מדובר ואחזור אליך בהקדם.
-            """.trimIndent()
-        ),
-        MessageTemplate(
-            id = "missed_call_auto_response",
-            title = "תגובה אוטומטית לשיחה שלא נענתה",
-            body = """
-                שלום, תודה שפניתם ל{{businessName}}.
-                אנחנו כרגע בשטח או בעבודה ולכן לא תמיד יכולים לענות מיד.
-                קיבלנו את פנייתכם ונחזור אליכם בהקדם.
-                אפשר לשלוח כאן בקצרה מה צריך לבצע או לצרף תמונה.
-            """.trimIndent()
-        )
+    /** Fresh-install default. */
+    const val DEFAULT_ID = GENTLE_ID
+
+    val open = MessageTemplate(
+        id = OPEN_ID,
+        title = "גלוי",
+        body = """
+            שלום, אני חירש/ת או כבד/ת שמיעה ולא תמיד יכול/ה לענות לשיחה קולית.
+            אפשר לכתוב לי כאן ב־WhatsApp או ב־SMS ואחזור אליך בכתב.
+        """.trimIndent()
     )
+
+    val gentle = MessageTemplate(
+        id = GENTLE_ID,
+        title = "עדין",
+        body = """
+            שלום, קשה לי לענות לשיחות קוליות.
+            אפשר בבקשה לכתוב לי כאן ב־WhatsApp או ב־SMS?
+        """.trimIndent()
+    )
+
+    val private = MessageTemplate(
+        id = PRIVATE_ID,
+        title = "פרטי",
+        body = """
+            שלום, אני מעדיף/ה תקשורת בכתב.
+            אפשר לכתוב לי כאן ואחזור אליך בהודעה.
+        """.trimIndent()
+    )
+
+    val all = listOf(open, gentle, private)
 }

@@ -1,6 +1,8 @@
 package com.followupnadlan.missedcall
 
 import android.content.Context
+import com.followupnadlan.templates.LegacyTemplateMigration
+import com.followupnadlan.templates.SprintOneTemplates
 
 class MissedCallAutoResponseSettings(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -12,7 +14,8 @@ class MissedCallAutoResponseSettings(context: Context) {
         }
 
     var selectedTemplateId: String
-        get() = preferences.getString(KEY_TEMPLATE_ID, null) ?: DEFAULT_TEMPLATE_ID
+        // Remap a stored legacy Nadlan/business template id to the accessibility default.
+        get() = LegacyTemplateMigration.migrateSelectedTemplateId(preferences.getString(KEY_TEMPLATE_ID, null))
         set(value) {
             preferences.edit().putString(KEY_TEMPLATE_ID, value).apply()
         }
@@ -66,7 +69,7 @@ class MissedCallAutoResponseSettings(context: Context) {
         }
 
     companion object {
-        const val DEFAULT_TEMPLATE_ID = "missed_call_auto_response"
+        val DEFAULT_TEMPLATE_ID = SprintOneTemplates.DEFAULT_ID
         const val SOURCE = "missed_call_auto_response"
         private const val PREFERENCES_NAME = "missed_call_auto_response_settings"
         private const val KEY_ENABLED = "enabled"

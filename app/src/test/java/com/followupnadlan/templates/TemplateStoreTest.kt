@@ -51,10 +51,55 @@ class TemplateStoreTest {
     }
 
     @Test
-    fun builtInTemplatesIncludeMissedCallAutoResponse() {
-        val template = SprintOneTemplates.all.first { it.id == "missed_call_auto_response" }
+    fun defaultOpenTemplateReturnsAccessibilityCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.OPEN_ID }
+        assertEquals("גלוי", template.title)
+        assertEquals(
+            "שלום, אני חירש/ת או כבד/ת שמיעה ולא תמיד יכול/ה לענות לשיחה קולית.\n" +
+                "אפשר לכתוב לי כאן ב־WhatsApp או ב־SMS ואחזור אליך בכתב.",
+            template.body
+        )
+    }
 
-        assertEquals("תגובה אוטומטית לשיחה שלא נענתה", template.title)
-        assert(template.body.contains("{{businessName}}"))
+    @Test
+    fun defaultGentleTemplateReturnsAccessibilityCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.GENTLE_ID }
+        assertEquals("עדין", template.title)
+        assertEquals(
+            "שלום, קשה לי לענות לשיחות קוליות.\n" +
+                "אפשר בבקשה לכתוב לי כאן ב־WhatsApp או ב־SMS?",
+            template.body
+        )
+    }
+
+    @Test
+    fun defaultPrivateTemplateReturnsAccessibilityCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.PRIVATE_ID }
+        assertEquals("פרטי", template.title)
+        assertEquals(
+            "שלום, אני מעדיף/ה תקשורת בכתב.\n" +
+                "אפשר לכתוב לי כאן ואחזור אליך בהודעה.",
+            template.body
+        )
+    }
+
+    @Test
+    fun freshInstallDefaultTemplateIsGentle() {
+        assertEquals(SprintOneTemplates.GENTLE_ID, SprintOneTemplates.DEFAULT_ID)
+        assertEquals("עדין", SprintOneTemplates.all.first { it.id == SprintOneTemplates.DEFAULT_ID }.title)
+    }
+
+    @Test
+    fun noDefaultTemplateContainsBusinessOrNadlanLanguage() {
+        val banned = listOf(
+            "נדל", "נדל״ן", "דירה", "נכס", "לקוח", "סוכן", "תיווך", "עסק",
+            "כרטיס ביקור", "FollowUp", "Lead", "Pipeline", "CRM", "{{businessName}}"
+        )
+        SprintOneTemplates.all.forEach { template ->
+            banned.forEach { word ->
+                assert(!template.title.contains(word)) { "title '${template.title}' contains '$word'" }
+                assert(!template.body.contains(word)) { "body of ${template.id} contains '$word'" }
+            }
+        }
     }
 }
