@@ -7,6 +7,9 @@ import com.followupnadlan.followuplog.FollowUpActionType
 import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
+import com.followupnadlan.accessibility.ExclusionsStore
+import com.followupnadlan.accessibility.RecipientScope
+import com.followupnadlan.accessibility.RecipientScopeSettings
 import com.followupnadlan.notifications.MissedCallManualReplyNotificationHelper
 import com.followupnadlan.postcall.CallLogReader
 import com.followupnadlan.postcall.FollowUpCallType
@@ -28,6 +31,9 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val whatsAppPackageResolver = WhatsAppPackageResolver(context)
     private val whatsAppReplySender = WhatsAppReplySender(context)
     private val whatsAppAutoSendController = WhatsAppAutoSendController(context)
+    private val recipientScopeSettings = RecipientScopeSettings(context)
+    private val exclusionsStore = ExclusionsStore(context)
+    private val contactVerifier = ContactVerifier(context)
 
     fun handleMissedIncomingCandidate() {
         val latestCall = CallLogReader(context).readLatestCall()
@@ -154,6 +160,22 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                 )
             MissedCallAutoResponseAction.SKIP_NO_NUMBER ->
                 appendLog(FollowUpActionType.AUTO_SMS_SKIPPED_NO_NUMBER, now, "", message, candidate.source)
+            MissedCallAutoResponseAction.SKIP_EXCLUDED ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_EXCLUDED,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+            MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_CONTACTS_ONLY,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
             MissedCallAutoResponseAction.SKIP_NO_PERMISSION ->
                 appendLog(
                     FollowUpActionType.AUTO_SMS_SKIPPED_NO_PERMISSION,
@@ -320,7 +342,11 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         nowEpochMs = now,
         templateAvailable = templateAvailable,
         manualFallbackAvailable = settings.manualSmsFallbackEnabled && canShowManualFallback(normalizedPhone ?: phone, message),
-        cooldownMillis = settings.cooldownMillis
+        cooldownMillis = settings.cooldownMillis,
+        excluded = exclusionsStore.isExcluded(normalizedPhone ?: phone),
+        recipientContactsOnly = recipientScopeSettings.scope == RecipientScope.CONTACTS_ONLY,
+        contactsPermissionGranted = contactVerifier.hasContactsPermission(),
+        isSavedContact = contactVerifier.isSavedContact(normalizedPhone ?: phone)
     )
 
     private fun renderMessage(templateBody: String): String {

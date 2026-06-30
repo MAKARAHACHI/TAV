@@ -25,5 +25,9 @@ object DebugMissedCallStatusFormatter {
                 "אירוע הבדיקה לא עומד בתנאי שיחה נכנסת שלא נענתה, ולכן לא תתבצע תגובה."
             MissedCallAutoResponseAction.SKIP_NO_TEMPLATE ->
                 "אירוע הבדיקה נשלח, אבל חסרה תבנית תגובה לשיחה שלא נענתה ולכן WhatsApp לא ייפתח."
+            MissedCallAutoResponseAction.SKIP_EXCLUDED ->
+                "אירוע הבדיקה נשלח, אבל המספר נמצא ברשימת מי שלא לשלוח לו, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED ->
+                "אירוע הבדיקה נשלח, אבל במצב אנשי קשר בלבד לא ניתן לוודא שהמספר שמור (חסרה הרשאת אנשי קשר או שהמספר לא ברשימה), ולכן לא ייפתח WhatsApp ולא יישלח SMS."
         }
 }

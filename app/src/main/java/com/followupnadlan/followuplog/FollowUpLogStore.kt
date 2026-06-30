@@ -15,6 +15,10 @@ class FollowUpLogStore(context: Context) {
             .apply()
     }
 
+    fun clear() {
+        preferences.edit().remove(KEY_ENTRIES).apply()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "follow_up_action_log"
         const val KEY_ENTRIES = "entries"

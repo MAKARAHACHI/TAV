@@ -176,6 +176,129 @@ class MissedCallAutoResponseDecisionTest {
         assertEquals(MissedCallAutoResponseAction.SKIP_DISABLED, action)
     }
 
+    @Test
+    fun excludedNumberSkipsBeforeAnyWhatsAppOrSms() {
+        // WhatsApp installed + SMS permission present: the only reason not to send is the exclusion.
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(excluded = true, whatsappInstalled = true, smsPermissionGranted = true)
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_EXCLUDED, action)
+    }
+
+    @Test
+    fun excludedNumberSkipsEvenInSmsOnlyMode() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(excluded = true, primaryChannel = MissedCallResponsePrimaryChannel.SMS_ONLY)
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_EXCLUDED, action)
+    }
+
+    @Test
+    fun contactsOnlySavedContactAllowsWhatsApp() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                recipientContactsOnly = true,
+                contactsPermissionGranted = true,
+                isSavedContact = true
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP, action)
+    }
+
+    @Test
+    fun contactsOnlyUnknownNumberSkips() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                recipientContactsOnly = true,
+                contactsPermissionGranted = true,
+                isSavedContact = false
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED, action)
+    }
+
+    @Test
+    fun contactsOnlyMissingPermissionSkipsAndDoesNotFallBackToAnyNumber() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                recipientContactsOnly = true,
+                contactsPermissionGranted = false,
+                isSavedContact = true
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED, action)
+    }
+
+    @Test
+    fun anyNumberModeAllowsUsableNumber() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                recipientContactsOnly = false,
+                contactsPermissionGranted = false,
+                isSavedContact = false
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP, action)
+    }
+
+    @Test
+    fun cooldownStillSkipsAfterRecipientRulesPass() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                recipientContactsOnly = true,
+                contactsPermissionGranted = true,
+                isSavedContact = true,
+                lastAutoReplyAtEpochMs = 1_000,
+                nowEpochMs = 1_000 + 5 * 60 * 60 * 1000L
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_DUPLICATE, action)
+    }
+
+    @Test
+    fun excludedTakesPrecedenceOverContactsOnly() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                excluded = true,
+                recipientContactsOnly = true,
+                contactsPermissionGranted = true,
+                isSavedContact = true
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_EXCLUDED, action)
+    }
+
+    @Test
+    fun askBeforeSendModeNeverAutoSendsWhatsApp() {
+        // PREPARED_MANUAL (ask-before-send) must open a prepared message, never auto-click send.
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                whatsappMode = MissedCallWhatsAppMode.PREPARED_MANUAL,
+                whatsappAutomationEnabled = true,
+                whatsappAccessibilityEnabled = true
+            )
+        )
+
+        assertEquals(MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP, action)
+    }
+
+    @Test
+    fun shortOrEmergencyNumberSkipsNoNumber() {
+        listOf("112", "911", "100", "123").forEach { phone ->
+            val action = MissedCallAutoResponseDecision.decide(defaultInput(phoneNumber = phone))
+
+            assertEquals("expected skip for $phone", MissedCallAutoResponseAction.SKIP_NO_NUMBER, action)
+        }
+    }
+
     private fun defaultInput(
         direction: MissedCallDirection = MissedCallDirection.INCOMING,
         wasAnswered: Boolean = false,
@@ -192,7 +315,11 @@ class MissedCallAutoResponseDecisionTest {
         lastAutoReplyAtEpochMs: Long? = null,
         nowEpochMs: Long = 10_000,
         templateAvailable: Boolean = true,
-        manualFallbackAvailable: Boolean = true
+        manualFallbackAvailable: Boolean = true,
+        excluded: Boolean = false,
+        recipientContactsOnly: Boolean = false,
+        contactsPermissionGranted: Boolean = true,
+        isSavedContact: Boolean = false
     ): MissedCallAutoResponseInput = MissedCallAutoResponseInput(
         direction = direction,
         wasAnswered = wasAnswered,
@@ -209,6 +336,10 @@ class MissedCallAutoResponseDecisionTest {
         lastAutoReplyAtEpochMs = lastAutoReplyAtEpochMs,
         nowEpochMs = nowEpochMs,
         templateAvailable = templateAvailable,
-        manualFallbackAvailable = manualFallbackAvailable
+        manualFallbackAvailable = manualFallbackAvailable,
+        excluded = excluded,
+        recipientContactsOnly = recipientContactsOnly,
+        contactsPermissionGranted = contactsPermissionGranted,
+        isSavedContact = isSavedContact
     )
 }

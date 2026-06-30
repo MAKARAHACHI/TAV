@@ -23,7 +23,13 @@ data class MissedCallAutoResponseInput(
     val nowEpochMs: Long,
     val templateAvailable: Boolean,
     val manualFallbackAvailable: Boolean,
-    val cooldownMillis: Long = MissedCallAutoResponseDecision.DEFAULT_COOLDOWN_MILLIS
+    val cooldownMillis: Long = MissedCallAutoResponseDecision.DEFAULT_COOLDOWN_MILLIS,
+    // Recipient rules. Defaults are permissive ("any number", not excluded) so that
+    // callers which do not set them keep the pre-recipient-rules behavior.
+    val excluded: Boolean = false,
+    val recipientContactsOnly: Boolean = false,
+    val contactsPermissionGranted: Boolean = true,
+    val isSavedContact: Boolean = false
 )
 
 enum class MissedCallResponsePrimaryChannel {
@@ -47,6 +53,8 @@ enum class MissedCallAutoResponseAction {
     SKIP_NO_NUMBER,
     SKIP_NOT_MISSED_CALL,
     SKIP_NO_TEMPLATE,
+    SKIP_EXCLUDED,
+    SKIP_CONTACTS_ONLY_UNVERIFIED,
     OPEN_MANUAL_FALLBACK
 }
 
@@ -56,14 +64,24 @@ object MissedCallAutoResponseDecision {
     fun decide(input: MissedCallAutoResponseInput): MissedCallAutoResponseAction {
         val phone = input.phoneNumber.orEmpty().trim()
 
+        // Decision order is fixed and must hold before any WhatsApp/SMS send:
+        // missed call → bridge enabled → usable number → excluded → recipient mode
+        // → template → cooldown → channel routing.
         if (input.direction != MissedCallDirection.INCOMING || input.wasAnswered) {
             return MissedCallAutoResponseAction.SKIP_NOT_MISSED_CALL
         }
-        if (phone.isBlank() || isPrivateOrUnknown(phone)) {
-            return MissedCallAutoResponseAction.SKIP_NO_NUMBER
-        }
         if (!input.featureEnabled) {
             return MissedCallAutoResponseAction.SKIP_DISABLED
+        }
+        if (phone.isBlank() || !isUsableNumber(phone)) {
+            return MissedCallAutoResponseAction.SKIP_NO_NUMBER
+        }
+        if (input.excluded) {
+            return MissedCallAutoResponseAction.SKIP_EXCLUDED
+        }
+        if (input.recipientContactsOnly && !(input.contactsPermissionGranted && input.isSavedContact)) {
+            // Contacts-only: never silently fall back to "any number".
+            return MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED
         }
         if (!input.templateAvailable) {
             return MissedCallAutoResponseAction.SKIP_NO_TEMPLATE
@@ -124,8 +142,28 @@ object MissedCallAutoResponseDecision {
         return elapsed in 0 until input.cooldownMillis
     }
 
-    private fun isPrivateOrUnknown(phone: String): Boolean {
-        val normalized = phone.trim().lowercase()
-        return normalized in setOf("unknown", "private", "anonymous", "restricted", "unavailable")
+    /**
+     * A number is usable only if it is a real, dialable subscriber number: not a
+     * private/unknown/withheld label, not an emergency/service short code, and long
+     * enough to be a genuine phone number.
+     */
+    private fun isUsableNumber(phone: String): Boolean {
+        val trimmed = phone.trim()
+        if (trimmed.lowercase() in PRIVATE_OR_UNKNOWN_LABELS) return false
+
+        val digits = trimmed.filter { it.isDigit() }
+        if (digits.isEmpty()) return false
+        if (digits.length < MIN_SUBSCRIBER_DIGITS) return false
+        if (digits in EMERGENCY_OR_SERVICE_NUMBERS) return false
+
+        return true
     }
+
+    private val PRIVATE_OR_UNKNOWN_LABELS =
+        setOf("unknown", "private", "anonymous", "restricted", "unavailable", "withheld", "blocked")
+
+    private val EMERGENCY_OR_SERVICE_NUMBERS =
+        setOf("100", "101", "102", "110", "112", "911", "999", "000")
+
+    private const val MIN_SUBSCRIBER_DIGITS = 7
 }
