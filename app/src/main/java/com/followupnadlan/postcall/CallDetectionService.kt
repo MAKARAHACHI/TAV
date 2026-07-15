@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -23,33 +24,41 @@ import com.followupnadlan.notifications.FollowUpNotificationHelper
 
 class CallDetectionService : Service() {
     private lateinit var monitor: CallStateMonitor
+    private lateinit var diagnostics: CallDetectionDiagnostics
     private val mainHandler = Handler(Looper.getMainLooper())
     private var telephonyCallback: TelephonyCallback? = null
     private var phoneStateListener: PhoneStateListener? = null
 
     override fun onCreate() {
         super.onCreate()
+        diagnostics = CallDetectionDiagnostics(applicationContext)
         val preferences = CallDetectionPreferences(applicationContext)
         monitor = CallStateMonitor(
             minCallDurationSeconds = preferences.minCallDurationSeconds.toLong(),
             onCallEnded = {
                 postFollowUpNotificationAfterCallEnd()
-            },
-            onMissedIncomingCall = {
-                handleMissedIncomingCall()
             }
         )
         startStatusNotification()
+        diagnostics.setServiceActive(true)
         registerCallListener()
+        runRecentMissedCallBackfill()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
         unregisterCallListener()
+        diagnostics.setServiceActive(false)
         super.onDestroy()
     }
 
@@ -73,26 +82,21 @@ class CallDetectionService : Service() {
         )
     }
 
-    private fun handleMissedIncomingCall() {
-        mainHandler.postDelayed(
-            {
-                MissedCallAutoResponseHandler(applicationContext).handleMissedIncomingCandidate()
-            },
-            CALL_LOG_READ_DELAY_MILLIS
-        )
-    }
-
     private fun registerCallListener() {
         if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            diagnostics.recordEvent(CallDetectionDiagnostics.PERMISSION_MISSING_READ_PHONE_STATE)
             stopSelf()
             return
+        }
+        if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            diagnostics.recordEvent(CallDetectionDiagnostics.PERMISSION_MISSING_READ_CALL_LOG)
         }
 
         val telephonyManager = getSystemService(TelephonyManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
                 override fun onCallStateChanged(state: Int) {
-                    handlePlatformState(state)
+                    handlePlatformState(state, null)
                 }
             }
             telephonyCallback = callback
@@ -102,13 +106,14 @@ class CallDetectionService : Service() {
             val listener = object : PhoneStateListener() {
                 @Deprecated("Deprecated by Android in favor of TelephonyCallback on API 31+.")
                 override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                    handlePlatformState(state)
+                    handlePlatformState(state, phoneNumber)
                 }
             }
             phoneStateListener = listener
             @Suppress("DEPRECATION")
             telephonyManager.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
         }
+        diagnostics.recordEvent(CallDetectionDiagnostics.CALL_RECEIVER_REGISTERED)
     }
 
     private fun unregisterCallListener() {
@@ -125,13 +130,24 @@ class CallDetectionService : Service() {
         }
     }
 
-    private fun handlePlatformState(state: Int) {
+    private fun handlePlatformState(state: Int, phoneNumber: String?) {
         val callState = when (state) {
             TelephonyManager.CALL_STATE_OFFHOOK -> CallStateMonitor.CallState.OFFHOOK
             TelephonyManager.CALL_STATE_RINGING -> CallStateMonitor.CallState.RINGING
             else -> CallStateMonitor.CallState.IDLE
         }
         monitor.onStateChanged(callState, System.currentTimeMillis())
+        PhoneStateEventProcessor(applicationContext, onConfirmedMissedCall = ::handleMissedIncomingCall)
+            .handleState(callState, phoneNumber)
+    }
+
+    private fun handleMissedIncomingCall(phoneNumber: String?) =
+        MissedCallAutoResponseHandler(applicationContext).handleConfirmedMissedIncomingCandidate(phoneNumber)
+
+    private fun runRecentMissedCallBackfill() {
+        MissedCallBackfill(applicationContext).processRecentMissedCalls { phone ->
+            MissedCallAutoResponseHandler(applicationContext).handleConfirmedMissedIncomingCandidate(phone)
+        }
     }
 
     private fun startStatusNotification() {
@@ -178,15 +194,30 @@ class CallDetectionService : Service() {
         )
     }
 
-    private companion object {
+    companion object {
+        private const val ACTION_STOP = "com.followupnadlan.postcall.STOP_CALL_DETECTION"
         const val STATUS_CHANNEL_ID = "call_detection_status"
-        const val STATUS_NOTIFICATION_ID = 9001
-        const val STATUS_REQUEST_CODE = 9001
-        const val CALL_LOG_READ_DELAY_MILLIS = 1_000L
-        const val STATUS_CHANNEL_NAME = "זיהוי שיחות"
-        const val STATUS_CHANNEL_DESCRIPTION = "התראת סטטוס לזיהוי סיום שיחה"
-        const val STATUS_TITLE = "זיהוי שיחות פעיל"
-        const val STATUS_BODY = "האפליקציה תציג התראת פולואפ אחרי שיחה."
+        private const val STATUS_NOTIFICATION_ID = 9001
+        private const val STATUS_REQUEST_CODE = 9001
+        private const val CALL_LOG_READ_DELAY_MILLIS = 1_000L
+        private const val STATUS_CHANNEL_NAME = "זיהוי שיחות"
+        private const val STATUS_CHANNEL_DESCRIPTION = "סטטוס לזיהוי שיחות שלא נענו"
+        private const val STATUS_TITLE = "אני זמין/ה בכתב פעיל"
+        private const val STATUS_BODY = "זיהוי שיחות שלא נענו פעיל ברקע."
+
+        fun start(context: Context) {
+            val intent = Intent(context, CallDetectionService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stop(context: Context) {
+            val intent = Intent(context, CallDetectionService::class.java).setAction(ACTION_STOP)
+            context.startService(intent)
+        }
     }
 }
 

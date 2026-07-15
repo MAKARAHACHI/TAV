@@ -24,4 +24,18 @@ class DebugMissedCallStatusFormatterTest {
 
         assertTrue(message.contains("WhatsApp אמור להיפתח"))
     }
+
+    @Test
+    fun manualPromptStatusExplainsApprovalRequired() {
+        val message = DebugMissedCallStatusFormatter.format(MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT)
+
+        assertTrue(message.contains("אישור"))
+    }
+
+    @Test
+    fun onlySelectedSkipExplainsAllowedList() {
+        val message = DebugMissedCallStatusFormatter.format(MissedCallAutoResponseAction.SKIP_NOT_ALLOWED)
+
+        assertTrue(message.contains("רשימת המותרים"))
+    }
 }

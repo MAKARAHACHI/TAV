@@ -28,9 +28,22 @@ data class MissedCallAutoResponseInput(
     // callers which do not set them keep the pre-recipient-rules behavior.
     val excluded: Boolean = false,
     val recipientContactsOnly: Boolean = false,
+    val recipientMode: MissedCallRecipientMode = MissedCallRecipientMode.ANY_NUMBER,
+    val allowedRecipientNumbers: List<String> = emptyList(),
+    val blockSavedContacts: Boolean = false,
+    val blockNonContacts: Boolean = false,
+    val blockFirstTimeNumbers: Boolean = false,
+    val isFirstTimeNumber: Boolean = false,
     val contactsPermissionGranted: Boolean = true,
     val isSavedContact: Boolean = false
 )
+
+enum class MissedCallRecipientMode {
+    ANY_NUMBER,
+    CONTACTS_ONLY,
+    NON_CONTACTS_ONLY,
+    ONLY_SELECTED
+}
 
 enum class MissedCallResponsePrimaryChannel {
     WHATSAPP_FIRST,
@@ -46,6 +59,7 @@ enum class MissedCallAutoResponseAction {
     ATTEMPT_WHATSAPP_AUTO_SEND,
     OPEN_PREPARED_WHATSAPP,
     OPEN_PREPARED_WHATSAPP_ACCESSIBILITY_MISSING,
+    SHOW_MANUAL_REPLY_PROMPT,
     SEND_AUTOMATIC_SMS,
     SKIP_DISABLED,
     SKIP_NO_PERMISSION,
@@ -54,7 +68,12 @@ enum class MissedCallAutoResponseAction {
     SKIP_NOT_MISSED_CALL,
     SKIP_NO_TEMPLATE,
     SKIP_EXCLUDED,
+    SKIP_BLOCKED_CONTACT,
+    SKIP_BLOCKED_NON_CONTACT,
+    SKIP_FIRST_TIME_NUMBER,
+    SKIP_CONTACT_TYPE_UNVERIFIED,
     SKIP_CONTACTS_ONLY_UNVERIFIED,
+    SKIP_NOT_ALLOWED,
     OPEN_MANUAL_FALLBACK
 }
 
@@ -79,15 +98,53 @@ object MissedCallAutoResponseDecision {
         if (input.excluded) {
             return MissedCallAutoResponseAction.SKIP_EXCLUDED
         }
-        if (input.recipientContactsOnly && !(input.contactsPermissionGranted && input.isSavedContact)) {
-            // Contacts-only: never silently fall back to "any number".
-            return MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED
+        val recipientMode = effectiveRecipientMode(input)
+        val contactTypeNeeded = input.blockSavedContacts ||
+            input.blockNonContacts ||
+            recipientMode == MissedCallRecipientMode.CONTACTS_ONLY ||
+            recipientMode == MissedCallRecipientMode.NON_CONTACTS_ONLY
+        if (contactTypeNeeded && !input.contactsPermissionGranted) {
+            return MissedCallAutoResponseAction.SKIP_CONTACT_TYPE_UNVERIFIED
+        }
+        if (input.blockSavedContacts && input.isSavedContact) {
+            return MissedCallAutoResponseAction.SKIP_BLOCKED_CONTACT
+        }
+        if (input.blockNonContacts && !input.isSavedContact) {
+            return MissedCallAutoResponseAction.SKIP_BLOCKED_NON_CONTACT
+        }
+        if (input.blockFirstTimeNumbers && input.isFirstTimeNumber) {
+            return MissedCallAutoResponseAction.SKIP_FIRST_TIME_NUMBER
+        }
+        when (recipientMode) {
+            MissedCallRecipientMode.CONTACTS_ONLY -> {
+                if (!input.isSavedContact) {
+                    // Contacts-only: never silently fall back to "any number".
+                    return MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED
+                }
+            }
+
+            MissedCallRecipientMode.NON_CONTACTS_ONLY -> {
+                if (input.isSavedContact) {
+                    return MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED
+                }
+            }
+
+            MissedCallRecipientMode.ONLY_SELECTED -> {
+                if (!AllowedRecipientDecisionMatcher.isAllowed(input.allowedRecipientNumbers, phone)) {
+                    return MissedCallAutoResponseAction.SKIP_NOT_ALLOWED
+                }
+            }
+
+            MissedCallRecipientMode.ANY_NUMBER -> Unit
         }
         if (!input.templateAvailable) {
             return MissedCallAutoResponseAction.SKIP_NO_TEMPLATE
         }
         if (isDuplicate(input)) {
             return MissedCallAutoResponseAction.SKIP_DUPLICATE
+        }
+        if (input.whatsappMode == MissedCallWhatsAppMode.PREPARED_MANUAL) {
+            return MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT
         }
 
         if (input.primaryChannel == MissedCallResponsePrimaryChannel.WHATSAPP_FIRST) {
@@ -142,6 +199,13 @@ object MissedCallAutoResponseDecision {
         return elapsed in 0 until input.cooldownMillis
     }
 
+    private fun effectiveRecipientMode(input: MissedCallAutoResponseInput): MissedCallRecipientMode =
+        if (input.recipientContactsOnly) {
+            MissedCallRecipientMode.CONTACTS_ONLY
+        } else {
+            input.recipientMode
+        }
+
     /**
      * A number is usable only if it is a real, dialable subscriber number: not a
      * private/unknown/withheld label, not an emergency/service short code, and long
@@ -166,4 +230,33 @@ object MissedCallAutoResponseDecision {
         setOf("100", "101", "102", "110", "112", "911", "999", "000")
 
     private const val MIN_SUBSCRIBER_DIGITS = 7
+}
+
+object AllowedRecipientDecisionMatcher {
+    fun isAllowed(allowedNumbers: List<String>, phoneNumber: String): Boolean {
+        val target = normalizedDigits(phoneNumber) ?: return false
+        return allowedNumbers.any { allowed -> normalizedDigits(allowed) == target }
+    }
+
+    private fun normalizedDigits(value: String): String? {
+        val compact = value.trim()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("(", "")
+            .replace(")", "")
+        if (compact.isBlank()) return null
+
+        val withoutPrefix = when {
+            compact.startsWith("+") -> compact.drop(1)
+            compact.startsWith("00") -> compact.drop(2)
+            else -> compact
+        }
+        if (!withoutPrefix.all { it.isDigit() }) return null
+        return when {
+            withoutPrefix.startsWith("0") && withoutPrefix.length >= 9 -> "972" + withoutPrefix.drop(1)
+            withoutPrefix.startsWith("972") -> withoutPrefix
+            withoutPrefix.length in 8..15 -> withoutPrefix
+            else -> null
+        }
+    }
 }

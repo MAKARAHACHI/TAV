@@ -6,16 +6,14 @@ package com.followupnadlan.templates
  *
  * Older installs may have:
  *  - a [selectedTemplateId] pointing at a removed legacy template id, and/or
- *  - saved bodies (per-template) that still hold the old business copy.
+ *  - saved bodies that still hold the old business copy.
  *
  * Migration rules:
  *  - A legacy selected id is remapped to the accessibility default (עדין).
- *  - A saved body that still matches a known legacy default text is dropped, so
- *    the new accessibility default text is shown instead.
- *  - A saved body that the user customized (does NOT match a legacy default) is
- *    left untouched — we never overwrite the user's own message.
- *
- * Pure logic only; the SharedPreferences plumbing lives in the stores that call this.
+ *  - A saved body that exactly matches a known legacy default text is dropped,
+ *    so the new accessibility default text is shown instead.
+ *  - A saved body that the user customized is left untouched. We never
+ *    overwrite the user's own message.
  */
 object LegacyTemplateMigration {
     /** Ids of templates that existed only in the old Nadlan/business app. */
@@ -27,15 +25,19 @@ object LegacyTemplateMigration {
     )
 
     /**
-     * Normalized snippets of the old default bodies. A saved body is considered a
-     * non-customized legacy default if it contains any of these, so we can safely
-     * replace it. Matching is whitespace-insensitive and trimmed.
+     * Exact old default bodies. Matching is whitespace-insensitive, but no longer
+     * substring-based, so user edits containing an old phrase are not erased.
      */
-    private val LEGACY_DEFAULT_MARKERS = listOf(
-        "תודה שפניתם ל",
-        "שמחתי לדבר איתך לגבי הדירה",
-        "שמחתי לדבר איתך לגבי הנכס",
-        "ראיתי שפספסתי את השיחה שלך"
+    private val LEGACY_DEFAULT_BODIES = listOf(
+        """
+            שלום, תודה שפניתם ל{{businessName}}.
+            אנחנו כרגע בשטח או בעבודה ולכן לא תמיד יכולים לענות מיד.
+            קיבלנו את פנייתכם ונחזור אליכם בהקדם.
+        """.trimIndent(),
+        "שלום, שמחתי לדבר איתך לגבי הדירה. מצרף פרטים.",
+        "שלום, שמחתי לדבר איתך לגבי הנכס. מצרף פרטים.",
+        "ראיתי שפספסת את השיחה שלך.",
+        "ראיתי שפספסתי את השיחה שלך."
     )
 
     /** Remaps a stored selected id to the accessibility default when it is legacy. */
@@ -51,14 +53,14 @@ object LegacyTemplateMigration {
         storedId != null && storedId in LEGACY_TEMPLATE_IDS
 
     /**
-     * Decides whether a saved body should be discarded (returning the accessibility
-     * default) or kept (user customization).
-     *
-     * @return true if the saved body is a legacy default that should be dropped.
+     * @return true if the saved body is a known legacy default that should be dropped.
      */
     fun isLegacyDefaultBody(savedBody: String?): Boolean {
         if (savedBody.isNullOrBlank()) return false
-        val normalized = savedBody.replace(Regex("\\s+"), " ").trim()
-        return LEGACY_DEFAULT_MARKERS.any { normalized.contains(it) }
+        val normalized = normalizeBody(savedBody)
+        return LEGACY_DEFAULT_BODIES.any { normalizeBody(it) == normalized }
     }
+
+    private fun normalizeBody(body: String): String =
+        body.replace(Regex("\\s+"), " ").trim()
 }

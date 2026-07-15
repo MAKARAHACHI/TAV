@@ -142,10 +142,11 @@ fun StatusChip(
     iconTint: Color,
     label: String,
     trailingIcon: ImageVector = AccessibilityIcons.CheckCircle,
-    trailingTint: Color = AccessibilityColors.GreenBright
+    trailingTint: Color = AccessibilityColors.GreenBright,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(AccessibilityColors.SubtleSurface)

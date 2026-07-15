@@ -8,6 +8,8 @@ import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.accessibility.ExclusionsStore
+import com.followupnadlan.accessibility.AllowedRecipientsStore
+import com.followupnadlan.accessibility.BlockedRecipientGroup
 import com.followupnadlan.accessibility.RecipientScope
 import com.followupnadlan.accessibility.RecipientScopeSettings
 import com.followupnadlan.notifications.MissedCallManualReplyNotificationHelper
@@ -15,6 +17,7 @@ import com.followupnadlan.postcall.CallLogReader
 import com.followupnadlan.postcall.FollowUpCallType
 import com.followupnadlan.postcall.LatestCallLogEntry
 import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.TemplateStore
 import com.followupnadlan.templates.TemplateTagRenderer
 import com.followupnadlan.templates.TemplateTagValues
@@ -33,11 +36,12 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val whatsAppAutoSendController = WhatsAppAutoSendController(context)
     private val recipientScopeSettings = RecipientScopeSettings(context)
     private val exclusionsStore = ExclusionsStore(context)
+    private val allowedRecipientsStore = AllowedRecipientsStore(context)
     private val contactVerifier = ContactVerifier(context)
 
-    fun handleMissedIncomingCandidate() {
+    fun handleMissedIncomingCandidate(): MissedCallAutoResponseAction {
         val latestCall = CallLogReader(context).readLatestCall()
-        handleMissedIncomingCandidate(
+        return handleMissedIncomingCandidate(
             MissedCallCandidate(
                 phoneNumber = latestCall?.phoneNumber.orEmpty(),
                 direction = directionFor(latestCall),
@@ -46,7 +50,20 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         )
     }
 
-    fun handleMissedIncomingCandidate(candidate: MissedCallCandidate) {
+    fun handleConfirmedMissedIncomingCandidate(phoneNumber: String?): MissedCallAutoResponseAction =
+        if (phoneNumber.isNullOrBlank()) {
+            handleMissedIncomingCandidate()
+        } else {
+            handleMissedIncomingCandidate(
+                MissedCallCandidate(
+                    phoneNumber = phoneNumber,
+                    direction = MissedCallDirection.INCOMING,
+                    wasAnswered = false
+                )
+            )
+        }
+
+    fun handleMissedIncomingCandidate(candidate: MissedCallCandidate): MissedCallAutoResponseAction {
         val now = System.currentTimeMillis()
         val evaluation = evaluateCandidate(candidate, now)
         val normalizedPhone = evaluation.normalizedPhone
@@ -123,6 +140,16 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                     source = candidate.source
                 )
             }
+            MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT -> {
+                appendLog(
+                    FollowUpActionType.MANUAL_REPLY_PENDING,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+                showManualReplyPrompt(normalizedPhone ?: phone, message)
+            }
             MissedCallAutoResponseAction.SEND_AUTOMATIC_SMS -> sendAutomaticSms(
                 phone = phone,
                 normalizedPhone = normalizedPhone.orEmpty(),
@@ -168,9 +195,49 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                     message,
                     candidate.source
                 )
+            MissedCallAutoResponseAction.SKIP_BLOCKED_CONTACT ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_BLOCKED_CONTACT,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+            MissedCallAutoResponseAction.SKIP_BLOCKED_NON_CONTACT ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_BLOCKED_NON_CONTACT,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+            MissedCallAutoResponseAction.SKIP_FIRST_TIME_NUMBER ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_FIRST_TIME,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+            MissedCallAutoResponseAction.SKIP_CONTACT_TYPE_UNVERIFIED ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_CONTACT_TYPE_UNVERIFIED,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
             MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED ->
                 appendLog(
                     FollowUpActionType.AUTO_SMS_SKIPPED_CONTACTS_ONLY,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
+            MissedCallAutoResponseAction.SKIP_NOT_ALLOWED ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_NOT_ALLOWED,
                     now,
                     normalizedPhone.orEmpty(),
                     message,
@@ -188,6 +255,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
             MissedCallAutoResponseAction.SKIP_NO_TEMPLATE ->
                 appendLog(FollowUpActionType.AUTO_SMS_FAILED, now, normalizedPhone.orEmpty(), "", candidate.source)
         }
+        return decision
     }
 
     fun previewMissedIncomingCandidate(candidate: MissedCallCandidate): MissedCallAutoResponseAction {
@@ -344,7 +412,17 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         manualFallbackAvailable = settings.manualSmsFallbackEnabled && canShowManualFallback(normalizedPhone ?: phone, message),
         cooldownMillis = settings.cooldownMillis,
         excluded = exclusionsStore.isExcluded(normalizedPhone ?: phone),
-        recipientContactsOnly = recipientScopeSettings.scope == RecipientScope.CONTACTS_ONLY,
+        recipientMode = when (recipientScopeSettings.scope) {
+            RecipientScope.ANY_NUMBER -> MissedCallRecipientMode.ANY_NUMBER
+            RecipientScope.CONTACTS_ONLY -> MissedCallRecipientMode.CONTACTS_ONLY
+            RecipientScope.NON_CONTACTS_ONLY -> MissedCallRecipientMode.NON_CONTACTS_ONLY
+            RecipientScope.ONLY_SELECTED -> MissedCallRecipientMode.ONLY_SELECTED
+        },
+        allowedRecipientNumbers = allowedRecipientsStore.load().map { it.number },
+        blockSavedContacts = exclusionsStore.loadBlockedGroups().contains(BlockedRecipientGroup.CONTACTS),
+        blockNonContacts = exclusionsStore.loadBlockedGroups().contains(BlockedRecipientGroup.NON_CONTACTS),
+        blockFirstTimeNumbers = exclusionsStore.loadBlockedGroups().contains(BlockedRecipientGroup.FIRST_TIME),
+        isFirstTimeNumber = FollowUpNumberHistory.isFirstTimeNumber(logStore.load(), normalizedPhone ?: phone),
         contactsPermissionGranted = contactVerifier.hasContactsPermission(),
         isSavedContact = contactVerifier.isSavedContact(normalizedPhone ?: phone)
     )
@@ -369,6 +447,11 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private fun showManualFallback(phone: String, message: String) {
         if (!canShowManualFallback(phone, message)) return
         manualReplyNotificationHelper.showManualSmsReply(phone, message)
+    }
+
+    private fun showManualReplyPrompt(phone: String, message: String) {
+        if (!canShowManualFallback(phone, message)) return
+        manualReplyNotificationHelper.showManualReplyPrompt(phone, message)
     }
 
     private fun canShowManualFallback(phone: String, message: String): Boolean =
@@ -412,8 +495,11 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private fun evaluateCandidate(candidate: MissedCallCandidate, now: Long): MissedCallEvaluation {
         val phone = candidate.phoneNumber.orEmpty()
         val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
-        val template = templateStore.loadTemplates().firstOrNull { it.id == settings.selectedTemplateId }
-        val message = template?.let { renderMessage(it.body) }.orEmpty()
+        val template = MissedCallMessageResolver.selectedTemplate(
+            templates = templateStore.loadTemplates(),
+            selectedTemplateId = settings.selectedTemplateId
+        )
+        val message = MissedCallMessageResolver.renderTemplate(template, ::renderMessage)
         val whatsappPackages = whatsAppPackageResolver.resolve(settings.preferredWhatsAppPackage)
         return MissedCallEvaluation(
             rawPhone = phone,
@@ -436,9 +522,26 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private data class MissedCallEvaluation(
         val rawPhone: String,
         val normalizedPhone: String?,
-        val template: com.followupnadlan.templates.MessageTemplate?,
+        val template: MessageTemplate?,
         val message: String,
         val whatsappPackages: WhatsAppPackageAvailability,
         val decisionInput: MissedCallAutoResponseInput
     )
+}
+
+internal object MissedCallMessageResolver {
+    fun selectedTemplate(templates: List<MessageTemplate>, selectedTemplateId: String): MessageTemplate? =
+        templates.firstOrNull { it.id == selectedTemplateId }
+
+    fun renderTemplate(template: MessageTemplate?, renderBody: (String) -> String): String =
+        template?.let { renderBody(it.body) }.orEmpty()
+}
+
+internal object FollowUpNumberHistory {
+    fun isFirstTimeNumber(entries: List<FollowUpLogEntry>, phoneNumber: String): Boolean {
+        val normalized = PhoneNumberNormalizer.normalizeForWhatsApp(phoneNumber) ?: return true
+        return entries.none { entry ->
+            PhoneNumberNormalizer.normalizeForWhatsApp(entry.phone) == normalized
+        }
+    }
 }

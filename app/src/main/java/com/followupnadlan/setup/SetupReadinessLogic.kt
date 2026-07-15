@@ -24,7 +24,7 @@ object SetupReadinessLogic {
                 passed = input.phoneStateGranted,
                 actionKey = "phone_state"
             ),
-            optionalCheck(
+            requiredCheck(
                 id = CheckId.CALL_LOG,
                 passed = input.callLogGranted,
                 actionKey = "call_log"

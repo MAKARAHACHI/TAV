@@ -14,6 +14,12 @@ data class ExcludedRecipient(
     val number: String = ""
 )
 
+enum class BlockedRecipientGroup {
+    CONTACTS,
+    NON_CONTACTS,
+    FIRST_TIME
+}
+
 /**
  * Local list of recipients to skip. Storage only: it persists the user's choices.
  * No new sending or detection logic — screens read/write this list, nothing else.
@@ -27,7 +33,36 @@ class ExclusionsStore(context: Context) {
     fun save(entries: List<ExcludedRecipient>) {
         preferences.edit()
             .putString(KEY_ENTRIES, ExclusionsCodec.encode(entries))
-            .apply()
+            .commit()
+    }
+
+    fun add(entry: ExcludedRecipient) {
+        val current = load()
+        if (current.any { it.matchesEntry(entry) }) return
+        save(current + entry)
+    }
+
+    fun remove(entry: ExcludedRecipient) {
+        save(load().filterNot { it.matchesEntry(entry) })
+    }
+
+    fun loadBlockedGroups(): Set<BlockedRecipientGroup> {
+        val raw = preferences.getStringSet(KEY_BLOCKED_GROUPS, emptySet()).orEmpty()
+        return raw.mapNotNull { value ->
+            runCatching { BlockedRecipientGroup.valueOf(value) }.getOrNull()
+        }.toSet()
+    }
+
+    fun setBlockedGroup(group: BlockedRecipientGroup, blocked: Boolean) {
+        val next = loadBlockedGroups().toMutableSet()
+        if (blocked) {
+            next.add(group)
+        } else {
+            next.remove(group)
+        }
+        preferences.edit()
+            .putStringSet(KEY_BLOCKED_GROUPS, next.map { it.name }.toSet())
+            .commit()
     }
 
     /** True if [phoneNumber] (raw or normalized) matches any excluded number entry. */
@@ -36,8 +71,13 @@ class ExclusionsStore(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "missed_call_exclusions"
         const val KEY_ENTRIES = "entries"
+        const val KEY_BLOCKED_GROUPS = "blocked_groups"
     }
 }
+
+private fun ExcludedRecipient.matchesEntry(other: ExcludedRecipient): Boolean =
+    number.isNotBlank() && other.number.isNotBlank() && number.filter { it.isDigit() }.takeLast(7) == other.number.filter { it.isDigit() }.takeLast(7) ||
+        label == other.label && number == other.number
 
 /**
  * Pure number-matching for exclusions. Compares by trailing digits so that the same

@@ -24,4 +24,24 @@ class PhoneNumberNormalizerTest {
     fun rejectsLetters() {
         assertNull(PhoneNumberNormalizer.normalizeForWhatsApp("050-abc-4567"))
     }
+
+    @Test
+    fun localDisplayConvertsBareIsraeliPrefixToZero() {
+        assertEquals("0501234567", PhoneNumberNormalizer.toLocalIsraeliDisplay("972501234567"))
+    }
+
+    @Test
+    fun localDisplayConvertsPlusIsraeliPrefixToZero() {
+        assertEquals("0501234567", PhoneNumberNormalizer.toLocalIsraeliDisplay("+972-50-123-4567"))
+    }
+
+    @Test
+    fun localDisplayKeepsAlreadyLocalNumber() {
+        assertEquals("0501234567", PhoneNumberNormalizer.toLocalIsraeliDisplay("050-123-4567"))
+    }
+
+    @Test
+    fun localDisplayLeavesOtherInternationalNumberAsIs() {
+        assertEquals("15551234567", PhoneNumberNormalizer.toLocalIsraeliDisplay("+1 555 123 4567"))
+    }
 }

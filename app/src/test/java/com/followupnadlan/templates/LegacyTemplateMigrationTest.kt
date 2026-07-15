@@ -53,6 +53,12 @@ class LegacyTemplateMigrationTest {
     }
 
     @Test
+    fun userCustomizedAccessibilityBodyContainingLegacyPhraseIsNotReplaced() {
+        val custom = "פתיח אישי. שלום, שמחתי לדבר איתך לגבי הדירה. מצרף פרטים. אפשר לכתוב לי כאן."
+        assertFalse(LegacyTemplateMigration.isLegacyDefaultBody(custom))
+    }
+
+    @Test
     fun blankBodyIsNotTreatedAsLegacy() {
         assertFalse(LegacyTemplateMigration.isLegacyDefaultBody(null))
         assertFalse(LegacyTemplateMigration.isLegacyDefaultBody(""))

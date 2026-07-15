@@ -17,7 +17,7 @@ class MissedCallAutoResponseSettings(context: Context) {
         // Remap a stored legacy Nadlan/business template id to the accessibility default.
         get() = LegacyTemplateMigration.migrateSelectedTemplateId(preferences.getString(KEY_TEMPLATE_ID, null))
         set(value) {
-            preferences.edit().putString(KEY_TEMPLATE_ID, value).apply()
+            preferences.edit().putString(KEY_TEMPLATE_ID, value).commit()
         }
 
     var primaryChannel: MissedCallResponsePrimaryChannel

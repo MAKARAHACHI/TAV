@@ -40,6 +40,43 @@ class CallLogReader(
         }
     }
 
+    fun readRecentMissedCalls(): List<RawCallLogRow> {
+        if (context.checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            return emptyList()
+        }
+
+        val since = nowMillis() - recencyWindowMillis
+        return try {
+            context.contentResolver.query(
+                CallLog.Calls.CONTENT_URI,
+                CALL_LOG_PROJECTION,
+                "${CallLog.Calls.TYPE} = ? AND ${CallLog.Calls.DATE} >= ?",
+                arrayOf(
+                    CallLogReaderLogic.PLATFORM_TYPE_MISSED.toString(),
+                    since.toString()
+                ),
+                "${CallLog.Calls.DATE} DESC LIMIT 5"
+            )?.use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(
+                            RawCallLogRow(
+                                phoneNumber = cursor.getString(COLUMN_NUMBER).orEmpty(),
+                                timestampMillis = cursor.getLong(COLUMN_DATE),
+                                durationSeconds = cursor.getLong(COLUMN_DURATION),
+                                platformType = cursor.getInt(COLUMN_TYPE)
+                            )
+                        )
+                    }
+                }
+            }.orEmpty()
+        } catch (_: SecurityException) {
+            emptyList()
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
+    }
+
     private companion object {
         val CALL_LOG_PROJECTION = arrayOf(
             CallLog.Calls.NUMBER,

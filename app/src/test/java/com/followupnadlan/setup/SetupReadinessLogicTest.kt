@@ -39,13 +39,13 @@ class SetupReadinessLogicTest {
     }
 
     @Test
-    fun callLogDeniedIsOptionalAndDoesNotBlockReady() {
+    fun callLogDeniedWarnsAndDoesNotReturnReady() {
         val result = SetupReadinessLogic.evaluate(
             readyInput(callLogGranted = false)
         )
 
-        assertEquals(ReadinessVerdict.READY, result.verdict)
-        assertEquals(CheckState.OPTIONAL_MISSING, result.check(CheckId.CALL_LOG).state)
+        assertEquals(ReadinessVerdict.PARTIAL, result.verdict)
+        assertEquals(CheckState.FAIL, result.check(CheckId.CALL_LOG).state)
     }
 
     @Test

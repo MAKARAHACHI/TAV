@@ -88,12 +88,15 @@ class FollowUpNotificationHelper(private val context: Context) {
     companion object {
         const val ACTION_OPEN_FOLLOW_UP = "com.followupnadlan.action.OPEN_FOLLOW_UP"
         const val EXTRA_PHONE = "followup_phone"
+        const val EXTRA_MESSAGE = "followup_message"
+        const val EXTRA_MANUAL_ACTION = "followup_manual_action"
         const val EXTRA_LEAD_NAME = "followup_lead_name"
         const val EXTRA_TEMPLATE_ID = "followup_template_id"
         const val EXTRA_CALL_DURATION_SECONDS = "followup_call_duration_seconds"
         const val EXTRA_CALL_TIMESTAMP_MILLIS = "followup_call_timestamp_millis"
         const val EXTRA_CALL_TYPE = "followup_call_type"
         const val REQUEST_CODE_OPEN_FOLLOW_UP = 8001
+        const val MANUAL_ACTION_CANCEL = "cancel"
 
         const val CHANNEL_ID = "follow_up_cards"
         private const val CHANNEL_NAME = "כרטיסי פולואפ"

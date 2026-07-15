@@ -9,6 +9,8 @@ object DebugMissedCallStatusFormatter {
                 "אירוע הבדיקה נשלח. WhatsApp אמור להיפתח עם הודעה מוכנה לשליחה."
             MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP_ACCESSIBILITY_MISSING ->
                 "אירוע הבדיקה נשלח. שירות הנגישות לא פעיל, לכן WhatsApp ייפתח עם הודעה מוכנה לשליחה ידנית."
+            MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT ->
+                "אירוע הבדיקה נשלח. תופיע בקשה לאישור לפני פתיחת WhatsApp או SMS."
             MissedCallAutoResponseAction.SEND_AUTOMATIC_SMS ->
                 "אירוע הבדיקה נשלח, אבל לפי ההגדרות הנוכחיות הפעולה הצפויה היא SMS ולא WhatsApp."
             MissedCallAutoResponseAction.OPEN_MANUAL_FALLBACK ->
@@ -27,7 +29,17 @@ object DebugMissedCallStatusFormatter {
                 "אירוע הבדיקה נשלח, אבל חסרה תבנית תגובה לשיחה שלא נענתה ולכן WhatsApp לא ייפתח."
             MissedCallAutoResponseAction.SKIP_EXCLUDED ->
                 "אירוע הבדיקה נשלח, אבל המספר נמצא ברשימת מי שלא לשלוח לו, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_BLOCKED_CONTACT ->
+                "אירוע הבדיקה נשלח, אבל אנשי קשר חסומים בהגדרה שלך, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_BLOCKED_NON_CONTACT ->
+                "אירוע הבדיקה נשלח, אבל מספרים לא שמורים חסומים בהגדרה שלך, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_FIRST_TIME_NUMBER ->
+                "אירוע הבדיקה נשלח, אבל מספר חדש בפעם הראשונה חסום בהגדרה שלך, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_CONTACT_TYPE_UNVERIFIED ->
+                "אירוע הבדיקה נשלח, אבל אין הרשאת אנשי קשר כדי לוודא את סוג המספר."
             MissedCallAutoResponseAction.SKIP_CONTACTS_ONLY_UNVERIFIED ->
-                "אירוע הבדיקה נשלח, אבל במצב אנשי קשר בלבד לא ניתן לוודא שהמספר שמור (חסרה הרשאת אנשי קשר או שהמספר לא ברשימה), ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+                "אירוע הבדיקה נשלח, אבל במצב אנשי קשר בלבד לא ניתן לוודא שהמספר שמור, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_NOT_ALLOWED ->
+                "אירוע הבדיקה נשלח, אבל המספר לא נמצא ברשימת המותרים ולכן לא ייפתח WhatsApp ולא יישלח SMS."
         }
 }

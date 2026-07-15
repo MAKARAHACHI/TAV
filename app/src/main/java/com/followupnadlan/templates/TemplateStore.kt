@@ -18,24 +18,30 @@ class TemplateStore(context: Context) {
     }
 
     private fun cleanLegacySavedBodies(builtInTemplates: List<MessageTemplate>) {
+        val editor = preferences.edit()
+        var changed = false
         builtInTemplates.forEach { template ->
             val saved = preferences.getString(bodyKey(template.id), null)
             if (LegacyTemplateMigration.isLegacyDefaultBody(saved)) {
-                preferences.edit().remove(bodyKey(template.id)).apply()
+                editor.remove(bodyKey(template.id))
+                changed = true
             }
+        }
+        if (changed) {
+            editor.commit()
         }
     }
 
     fun saveTemplate(template: MessageTemplate) {
         preferences.edit()
             .putString(bodyKey(template.id), template.body)
-            .apply()
+            .commit()
     }
 
     fun resetTemplate(templateId: String) {
         preferences.edit()
             .remove(bodyKey(templateId))
-            .apply()
+            .commit()
     }
 
     private companion object {
@@ -57,4 +63,13 @@ internal object TemplateStoreLogic {
             template.copy(body = savedBody)
         }
     }
+
+    fun selectedTemplate(
+        templates: List<MessageTemplate>,
+        selectedTemplateId: String,
+        defaultTemplateId: String = SprintOneTemplates.DEFAULT_ID
+    ): MessageTemplate? =
+        templates.firstOrNull { it.id == selectedTemplateId }
+            ?: templates.firstOrNull { it.id == defaultTemplateId }
+            ?: templates.firstOrNull()
 }

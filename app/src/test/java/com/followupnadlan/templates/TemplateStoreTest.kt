@@ -51,6 +51,34 @@ class TemplateStoreTest {
     }
 
     @Test
+    fun editingOpenTemplateSavesAndReloadsCustomBody() {
+        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.OPEN_ID, "custom open body")
+    }
+
+    @Test
+    fun editingGentleTemplateSavesAndReloadsCustomBody() {
+        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.GENTLE_ID, "custom gentle body")
+    }
+
+    @Test
+    fun editingPrivateTemplateSavesAndReloadsCustomBody() {
+        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.PRIVATE_ID, "custom private body")
+    }
+
+    @Test
+    fun selectedTemplateCustomBodyOverridesBuiltInDefault() {
+        val customBody = "selected custom body"
+        val templates = TemplateStoreLogic.applySavedBodies(
+            builtInTemplates = SprintOneTemplates.all,
+            savedBodiesById = mapOf(SprintOneTemplates.GENTLE_ID to customBody)
+        )
+
+        val selected = TemplateStoreLogic.selectedTemplate(templates, SprintOneTemplates.GENTLE_ID)
+
+        assertEquals(customBody, selected?.body)
+    }
+
+    @Test
     fun defaultOpenTemplateReturnsAccessibilityCopy() {
         val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.OPEN_ID }
         assertEquals("גלוי", template.title)
@@ -101,5 +129,19 @@ class TemplateStoreTest {
                 assert(!template.body.contains(word)) { "body of ${template.id} contains '$word'" }
             }
         }
+    }
+
+    private fun assertSavedAccessibilityBodySurvivesReload(templateId: String, customBody: String) {
+        val firstLoad = TemplateStoreLogic.applySavedBodies(
+            builtInTemplates = SprintOneTemplates.all,
+            savedBodiesById = mapOf(templateId to customBody)
+        )
+        assertEquals(customBody, firstLoad.first { it.id == templateId }.body)
+
+        val reload = TemplateStoreLogic.applySavedBodies(
+            builtInTemplates = SprintOneTemplates.all,
+            savedBodiesById = mapOf(templateId to firstLoad.first { it.id == templateId }.body)
+        )
+        assertEquals(customBody, reload.first { it.id == templateId }.body)
     }
 }
