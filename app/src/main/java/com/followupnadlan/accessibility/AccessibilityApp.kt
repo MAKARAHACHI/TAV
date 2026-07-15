@@ -139,7 +139,9 @@ internal object HomeMessagePreviewLogic {
 data class MissedCallLaunch(
     val phone: String = "",
     val message: String = "",
-    val fromNotification: Boolean = false
+    val fromNotification: Boolean = false,
+    /** Raw notification call-type extra ("missed"/"incoming"/"outgoing"); decides the prompt wording. */
+    val callType: String? = null
 )
 
 /**
@@ -452,6 +454,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
                         message = missedCallLaunch.message,
+                        mode = FollowUpPromptModeLogic.fromCallType(missedCallLaunch.callType),
                         templates = templates,
                         selectedTemplateId = selectedTemplateId,
                         askBeforeSend = askBeforeSend,
@@ -1129,6 +1132,7 @@ private fun TemplateCardEditor(
 private fun MissedCallPromptScreen(
     phone: String,
     message: String,
+    mode: FollowUpPromptMode,
     templates: List<MessageTemplate>,
     selectedTemplateId: String,
     askBeforeSend: Boolean,
@@ -1142,22 +1146,28 @@ private fun MissedCallPromptScreen(
     val activeTemplate = templates.firstOrNull { it.id == activeId }
         ?: templates.firstOrNull { it.id == selectedTemplateId }
         ?: templates.firstOrNull()
-    val resolvedMessage = if (showSelector) {
+    val templateMessage = if (showSelector) {
         activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
     } else {
         message.ifBlank { activeTemplate?.let { MessageComposition.build(it) }.orEmpty() }
     }
+    // A per-call, in-place edit that is NOT saved to the store — it only tailors this one
+    // send. It resets whenever the underlying template message changes (e.g. picking a chip).
+    var localEdit by remember(templateMessage) { mutableStateOf<String?>(null) }
+    var editing by remember { mutableStateOf(false) }
+    val resolvedMessage = localEdit ?: templateMessage
     val normalizedPhone = remember(phone) { PhoneNumberNormalizer.normalizeForWhatsApp(phone) }
     var status by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         IconBadge(
-            icon = AccessibilityIcons.PhoneMissed,
+            icon = if (mode == FollowUpPromptMode.MISSED_CALL) AccessibilityIcons.PhoneMissed else AccessibilityIcons.PhoneInTalk,
             background = AccessibilityColors.PrimaryContainer,
             tint = AccessibilityColors.Primary,
             boxSize = 92,
@@ -1165,7 +1175,7 @@ private fun MissedCallPromptScreen(
             iconSize = 48
         )
         Spacer(modifier = Modifier.height(18.dp))
-        Text("שיחה שלא נענתה", fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = AccessibilityColors.Heading)
+        Text(FollowUpPromptModeLogic.title(mode), fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = AccessibilityColors.Heading)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = phone.ifBlank { "מספר לא ידוע" },
@@ -1184,11 +1194,29 @@ private fun MissedCallPromptScreen(
                 onSelect = { activeId = it },
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        // Message bubble + quick in-place edit — always available, in both modes.
+        Spacer(modifier = Modifier.height(16.dp))
+        WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinePillButton(
+            text = "ערוך הודעה",
+            onClick = { editing = true },
+            borderColor = AccessibilityColors.Primary,
+            contentColor = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.Edit
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "עריכה זו מתאימה את ההודעה לשיחה הזו בלבד ואינה נשמרת כברירת מחדל.",
+            fontSize = 12.sp,
+            color = AccessibilityColors.TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         PillButton(
             text = "שלח ב־WhatsApp",
@@ -1236,6 +1264,79 @@ private fun MissedCallPromptScreen(
             Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp)
         }
     }
+
+    if (editing) {
+        FollowUpMessageEditorDialog(
+            message = resolvedMessage,
+            onSave = { edited ->
+                localEdit = edited
+                editing = false
+            },
+            onCancel = { editing = false }
+        )
+    }
+}
+
+/**
+ * Quick, per-call message editor for the follow-up prompt. Unlike the Home editor, the result
+ * is NOT persisted — it only tailors the current send, so the copy makes that explicit.
+ */
+@Composable
+private fun FollowUpMessageEditorDialog(
+    message: String,
+    onSave: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var draft by remember(message) { mutableStateOf(message) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun saveDraft() {
+        if (draft.isBlank()) {
+            error = "ההודעה לא יכולה להיות ריקה"
+            return
+        }
+        onSave(draft)
+    }
+
+    AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .navigationBarsPadding(),
+        onDismissRequest = onCancel,
+        title = { Text("עריכת ההודעה לשיחה זו", fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "השינוי מתאים את ההודעה לשיחה הנוכחית בלבד ואינו נשמר כברירת מחדל.",
+                    color = AccessibilityColors.TextMuted,
+                    fontSize = 14.sp
+                )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = {
+                        draft = it
+                        error = null
+                    },
+                    minLines = 6,
+                    maxLines = 10,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp, max = 310.dp)
+                )
+                error?.let { Text(it, color = AccessibilityColors.Danger, fontSize = 13.sp) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { saveDraft() }) {
+                Text("שמור לשיחה זו", fontWeight = FontWeight.Bold, color = AccessibilityColors.Primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text("ביטול", color = AccessibilityColors.TextBody)
+            }
+        }
+    )
 }
 
 /** Horizontal, scrollable row of selectable template chips (by title). */

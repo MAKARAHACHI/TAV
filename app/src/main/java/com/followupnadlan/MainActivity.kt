@@ -85,7 +85,8 @@ class MainActivity : ComponentActivity() {
         return MissedCallLaunch(
             phone = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_PHONE).orEmpty(),
             message = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_MESSAGE).orEmpty(),
-            fromNotification = true
+            fromNotification = true,
+            callType = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_CALL_TYPE)
         )
     }
 }
