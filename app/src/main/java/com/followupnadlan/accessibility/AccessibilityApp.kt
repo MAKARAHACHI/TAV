@@ -122,15 +122,17 @@ internal object AccessibilityBackNavigation {
 }
 
 internal object HomeMessagePreviewLogic {
-    fun preview(templates: List<MessageTemplate>, selectedTemplateId: String): String =
-        templates.firstOrNull { it.id == selectedTemplateId }
-            ?.body
-            .orEmpty()
-            .lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .take(3)
-            .joinToString("\n")
+    /**
+     * The full message that will actually be sent for the selected card — body plus the
+     * appended link lines — so Home shows exactly what the recipient receives. Falls back to
+     * the first card when the saved id is orphaned (matches the engine/UI fallback).
+     */
+    fun preview(templates: List<MessageTemplate>, selectedTemplateId: String): String {
+        val template = templates.firstOrNull { it.id == selectedTemplateId }
+            ?: templates.firstOrNull()
+            ?: return ""
+        return MessageComposition.build(template)
+    }
 }
 
 /** Carries the missed-call context when the app is opened from a follow-up notification. */
@@ -605,7 +607,7 @@ private fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 )
-                WhatsAppMessagePreview(message = HomeMessagePreviewLogic.preview(templates, selectedTemplateId))
+                WhatsAppMessagePreview(message = HomeMessagePreviewLogic.preview(templates, selectedTemplateId), maxLines = 8)
                 OutlinePillButton(
                     text = "ערוך הודעה",
                     onClick = { editingMessage = true },
