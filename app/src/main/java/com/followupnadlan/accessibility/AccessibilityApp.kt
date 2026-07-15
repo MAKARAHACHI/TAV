@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,15 +66,14 @@ import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
 import com.followupnadlan.missedcall.MissedCallWhatsAppMode
 import com.followupnadlan.missedcall.WhatsAppPackageResolver
-import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.postcall.CallDetectionDiagnostics
 import com.followupnadlan.postcall.CallDetectionDiagnosticsSnapshot
 import com.followupnadlan.postcall.CallDetectionPreferences
 import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.postcall.CallDetectionServiceAction
 import com.followupnadlan.postcall.CallDetectionServiceLifecycle
+import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
-import com.followupnadlan.templates.SprintOneTemplates
 import com.followupnadlan.templates.TemplateStore
 import com.followupnadlan.templates.TemplateStoreLogic
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
@@ -157,7 +157,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
-    val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
 
     var tab by remember { mutableStateOf(AccessibilityTab.HOME) }
     var modal by remember {
@@ -406,6 +405,22 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             templateStore.saveTemplate(template)
                             templates = templateStore.loadTemplates()
                         },
+                        onAddTemplate = { title, body, cardLink, websiteLink ->
+                            templateStore.addTemplate(title, body, cardLink, websiteLink)
+                            templates = templateStore.loadTemplates()
+                        },
+                        onDeleteTemplate = { id ->
+                            templateStore.deleteTemplate(id)
+                            val reloaded = templateStore.loadTemplates()
+                            templates = reloaded
+                            // If the default was deleted, fall back to the first remaining card.
+                            if (reloaded.none { it.id == selectedTemplateId }) {
+                                reloaded.firstOrNull()?.let { fallback ->
+                                    selectedTemplateId = fallback.id
+                                    settings.selectedTemplateId = fallback.id
+                                }
+                            }
+                        },
                         onBack = { modal = AccessibilityModal.NONE }
                     )
 
@@ -435,9 +450,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
                         message = missedCallLaunch.message,
-                        templateStore = templateStore,
-                        myDetailsStore = myDetailsStore,
+                        templates = templates,
                         selectedTemplateId = selectedTemplateId,
+                        askBeforeSend = askBeforeSend,
                         onDone = { modal = AccessibilityModal.NONE }
                     )
                 }
@@ -703,7 +718,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun WhatsAppMessagePreview(message: String) {
+private fun WhatsAppMessagePreview(message: String, maxLines: Int = 4) {
     Surface(
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
         color = Color(0xFFE4F8D8),
@@ -715,7 +730,7 @@ private fun WhatsAppMessagePreview(message: String) {
             color = AccessibilityColors.TextStrong,
             fontSize = 18.sp,
             lineHeight = 29.sp,
-            maxLines = 4,
+            maxLines = maxLines,
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)
         )
     }
@@ -865,13 +880,15 @@ private fun SetupConsentScreen(onEnable: () -> Unit, onDismiss: () -> Unit) {
 }
 
 // ===================== SCREEN 3 — TEMPLATES =====================
-private data class TemplateChoice(val id: String, val title: String, val subtitle: String)
-
-private val TEMPLATE_CHOICES = listOf(
-    TemplateChoice(SprintOneTemplates.OPEN_ID, "גלוי", "אני חירש/ת או כבד/ת שמיעה — אפשר לכתוב לי ב־WhatsApp או ב־SMS."),
-    TemplateChoice(SprintOneTemplates.GENTLE_ID, "עדין", "קשה לי לענות לשיחות קוליות — אפשר בבקשה לכתוב לי?"),
-    TemplateChoice(SprintOneTemplates.PRIVATE_ID, "פרטי", "אני מעדיף/ה תקשורת בכתב — אפשר לכתוב לי כאן.")
-)
+/** A short one-line body preview for the template list. */
+internal object TemplateCardSummary {
+    fun bodyPreview(body: String): String =
+        body.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .let { if (it.length > 70) it.take(70).trimEnd() + "…" else it }
+}
 
 @Composable
 private fun TemplatesScreen(
@@ -879,55 +896,91 @@ private fun TemplatesScreen(
     selectedTemplateId: String,
     onSelectTemplate: (String) -> Unit,
     onSaveTemplate: (MessageTemplate) -> Unit,
+    onAddTemplate: (String, String, String, String) -> Unit,
+    onDeleteTemplate: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    var editing by remember { mutableStateOf(false) }
-    val activeTemplate = templates.firstOrNull { it.id == selectedTemplateId } ?: templates.firstOrNull()
+    // null + creatingNew=false → list; editing an existing template → editing != null; new card → creatingNew.
+    var editing by remember { mutableStateOf<MessageTemplate?>(null) }
+    var creatingNew by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .imePadding()
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         ModalHeader(title = "הודעת ברירת מחדל", onBack = onBack)
-        Text(
-            text = "בחר/י את הנוסח שיישלח כברירת מחדל.",
-            fontSize = 14.sp,
-            color = AccessibilityColors.TextMuted,
-            modifier = Modifier.fillMaxWidth()
-        )
 
-        TEMPLATE_CHOICES.forEach { choice ->
-            val selected = choice.id == selectedTemplateId
-            TemplateCard(choice = choice, selected = selected, onClick = { onSelectTemplate(choice.id) })
-        }
-
-        if (editing && activeTemplate != null) {
-            TemplateEditor(
-                template = activeTemplate,
-                onSave = { body ->
-                    onSaveTemplate(activeTemplate.copy(body = body))
-                    editing = false
-                },
-                onCancel = { editing = false }
-            )
-        } else {
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinePillButton(
-                text = "ערוך נוסח",
-                onClick = { editing = true },
-                borderColor = AccessibilityColors.Primary,
-                contentColor = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.Edit
-            )
+        when {
+            creatingNew || editing != null -> {
+                val target = editing
+                TemplateCardEditor(
+                    template = target,
+                    onSave = { title, body, cardLink, websiteLink ->
+                        if (target == null) {
+                            onAddTemplate(title, body, cardLink, websiteLink)
+                        } else {
+                            onSaveTemplate(
+                                target.copy(
+                                    title = title,
+                                    body = body,
+                                    cardLink = cardLink,
+                                    websiteLink = websiteLink
+                                )
+                            )
+                        }
+                        creatingNew = false
+                        editing = null
+                    },
+                    onCancel = {
+                        creatingNew = false
+                        editing = null
+                    }
+                )
+            }
+            else -> {
+                Text(
+                    text = "בחר/י את הכרטיסייה שתישלח כברירת מחדל, או צור/י חדשה.",
+                    fontSize = 14.sp,
+                    color = AccessibilityColors.TextMuted,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                templates.forEach { template ->
+                    TemplateCard(
+                        template = template,
+                        selected = template.id == selectedTemplateId,
+                        canDelete = templates.size > 1,
+                        onClick = { onSelectTemplate(template.id) },
+                        onEdit = { editing = template },
+                        onDelete = { onDeleteTemplate(template.id) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinePillButton(
+                    text = "כרטיסייה חדשה",
+                    onClick = { creatingNew = true },
+                    borderColor = AccessibilityColors.Primary,
+                    contentColor = AccessibilityColors.Primary,
+                    leadingIcon = AccessibilityIcons.Add
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun TemplateCard(choice: TemplateChoice, selected: Boolean, onClick: () -> Unit) {
+private fun TemplateCard(
+    template: MessageTemplate,
+    selected: Boolean,
+    canDelete: Boolean,
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val hasLinks = template.cardLink.isNotBlank() || template.websiteLink.isNotBlank()
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = if (selected) AccessibilityColors.GreenSurface else AccessibilityColors.SubtleSurface,
@@ -939,39 +992,130 @@ private fun TemplateCard(choice: TemplateChoice, selected: Boolean, onClick: () 
             .fillMaxWidth()
             .clickable(onClick = onClick)
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(choice.title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.TextStrong)
-                Text(choice.subtitle, fontSize = 13.sp, color = AccessibilityColors.TextMuted)
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(template.title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.TextStrong)
+                    Text(
+                        TemplateCardSummary.bodyPreview(template.body),
+                        fontSize = 13.sp,
+                        color = AccessibilityColors.TextMuted
+                    )
+                    if (hasLinks) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(
+                                AccessibilityIcons.Link,
+                                contentDescription = null,
+                                tint = AccessibilityColors.Primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text("כולל קישורים", fontSize = 12.sp, color = AccessibilityColors.Primary)
+                        }
+                    }
+                }
+                Icon(
+                    if (selected) AccessibilityIcons.RadioChecked else AccessibilityIcons.RadioUnchecked,
+                    contentDescription = null,
+                    tint = if (selected) AccessibilityColors.GreenCheck else AccessibilityColors.UnselectedIcon,
+                    modifier = Modifier.size(23.dp)
+                )
             }
-            Icon(
-                if (selected) AccessibilityIcons.RadioChecked else AccessibilityIcons.RadioUnchecked,
-                contentDescription = null,
-                tint = if (selected) AccessibilityColors.GreenCheck else AccessibilityColors.UnselectedIcon,
-                modifier = Modifier.size(23.dp)
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.clickable(onClick = onEdit)
+                ) {
+                    Icon(AccessibilityIcons.Edit, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(17.dp))
+                    Text("ערוך", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AccessibilityColors.Primary)
+                }
+                if (canDelete) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.clickable(onClick = onDelete)
+                    ) {
+                        Icon(AccessibilityIcons.Delete, contentDescription = null, tint = AccessibilityColors.Danger, modifier = Modifier.size(17.dp))
+                        Text("מחק", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AccessibilityColors.Danger)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TemplateEditor(template: MessageTemplate, onSave: (String) -> Unit, onCancel: () -> Unit) {
-    var body by remember(template.id) { mutableStateOf(template.body) }
+private fun TemplateCardEditor(
+    template: MessageTemplate?,
+    onSave: (String, String, String, String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var title by remember(template?.id) { mutableStateOf(template?.title.orEmpty()) }
+    var body by remember(template?.id) { mutableStateOf(template?.body.orEmpty()) }
+    var cardLink by remember(template?.id) { mutableStateOf(template?.cardLink.orEmpty()) }
+    var websiteLink by remember(template?.id) { mutableStateOf(template?.websiteLink.orEmpty()) }
+    var error by remember(template?.id) { mutableStateOf<String?>(null) }
+
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("ערוך נוסח", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = AccessibilityColors.Heading)
-            androidx.compose.material3.OutlinedTextField(
-                value = body,
-                onValueChange = { body = it },
-                minLines = 5,
+            Text(
+                if (template == null) "כרטיסייה חדשה" else "עריכת כרטיסייה",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = AccessibilityColors.Heading
+            )
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("כותרת") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            OutlinedTextField(
+                value = body,
+                onValueChange = { body = it },
+                label = { Text("נוסח ההודעה") },
+                minLines = 4,
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = cardLink,
+                onValueChange = { cardLink = it },
+                label = { Text("קישור לכרטיס דיגיטלי (לא חובה)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = websiteLink,
+                onValueChange = { websiteLink = it },
+                label = { Text("קישור לאתר (לא חובה)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text("תצוגה מקדימה", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextMuted)
+            WhatsAppMessagePreview(
+                message = com.followupnadlan.templates.MessageComposition.build(body, cardLink, websiteLink),
+                maxLines = 12
+            )
+
+            error?.let { Text(it, color = AccessibilityColors.Danger, fontSize = 13.sp) }
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                PillButton(text = "שמור נוסח", onClick = { onSave(body) }, modifier = Modifier.weight(1f))
+                PillButton(
+                    text = "שמור",
+                    onClick = {
+                        val trimmedTitle = title.trim()
+                        if (trimmedTitle.isBlank() || body.isBlank()) {
+                            error = "כותרת ונוסח הם שדות חובה"
+                            return@PillButton
+                        }
+                        onSave(trimmedTitle, body, cardLink.trim(), websiteLink.trim())
+                    },
+                    modifier = Modifier.weight(1f)
+                )
                 OutlinePillButton(text = "בטל", onClick = onCancel, modifier = Modifier.weight(1f))
             }
         }
@@ -983,16 +1127,23 @@ private fun TemplateEditor(template: MessageTemplate, onSave: (String) -> Unit, 
 private fun MissedCallPromptScreen(
     phone: String,
     message: String,
-    templateStore: TemplateStore,
-    myDetailsStore: MyDetailsStore,
+    templates: List<MessageTemplate>,
     selectedTemplateId: String,
+    askBeforeSend: Boolean,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
-    val resolvedMessage = remember(message, selectedTemplateId) {
-        message.ifBlank {
-            templateStore.loadTemplates().firstOrNull { it.id == selectedTemplateId }?.body.orEmpty()
-        }
+    // Manual "ask me" mode with more than one card lets the user pick a different template
+    // for this send only (it does not change the saved default).
+    val showSelector = askBeforeSend && templates.size > 1
+    var activeId by remember(selectedTemplateId) { mutableStateOf(selectedTemplateId) }
+    val activeTemplate = templates.firstOrNull { it.id == activeId }
+        ?: templates.firstOrNull { it.id == selectedTemplateId }
+        ?: templates.firstOrNull()
+    val resolvedMessage = if (showSelector) {
+        activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
+    } else {
+        message.ifBlank { activeTemplate?.let { MessageComposition.build(it) }.orEmpty() }
     }
     val normalizedPhone = remember(phone) { PhoneNumberNormalizer.normalizeForWhatsApp(phone) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -1022,6 +1173,18 @@ private fun MissedCallPromptScreen(
         )
         Spacer(modifier = Modifier.height(14.dp))
         Text("לשלוח הודעה?", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = AccessibilityColors.TextBody)
+
+        if (showSelector) {
+            Spacer(modifier = Modifier.height(16.dp))
+            TemplateChipRow(
+                templates = templates,
+                selectedId = activeId,
+                onSelect = { activeId = it },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -1069,6 +1232,41 @@ private fun MissedCallPromptScreen(
         status?.let {
             Spacer(modifier = Modifier.height(10.dp))
             Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp)
+        }
+    }
+}
+
+/** Horizontal, scrollable row of selectable template chips (by title). */
+@Composable
+private fun TemplateChipRow(
+    templates: List<MessageTemplate>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        templates.forEach { template ->
+            val selected = template.id == selectedId
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = if (selected) AccessibilityColors.Primary else AccessibilityColors.SubtleSurface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.5.dp,
+                    if (selected) AccessibilityColors.Primary else AccessibilityColors.CardBorder
+                ),
+                modifier = Modifier.clickable { onSelect(template.id) }
+            ) {
+                Text(
+                    text = template.title,
+                    color = if (selected) Color.White else AccessibilityColors.TextBody,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                )
+            }
         }
     }
 }

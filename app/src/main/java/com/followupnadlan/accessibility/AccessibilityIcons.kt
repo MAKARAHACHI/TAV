@@ -192,6 +192,32 @@ object AccessibilityIcons {
         }
     }
 
+    val Add: ImageVector = icon("add") {
+        solid {
+            moveTo(11f, 4f); horizontalLineTo(13f); verticalLineTo(11f); horizontalLineTo(20f)
+            verticalLineTo(13f); horizontalLineTo(13f); verticalLineTo(20f); horizontalLineTo(11f)
+            verticalLineTo(13f); horizontalLineTo(4f); verticalLineTo(11f); horizontalLineTo(11f); close()
+        }
+    }
+
+    val Link: ImageVector = icon("link") {
+        solid {
+            moveTo(7f, 11f); horizontalLineTo(17f); verticalLineTo(13f); horizontalLineTo(7f); close()
+        }
+        solid {
+            moveTo(8f, 7f); horizontalLineTo(11f); verticalLineTo(9f); horizontalLineTo(8f)
+            curveTo(6.3f, 9f, 5f, 10.3f, 5f, 12f); curveTo(5f, 13.7f, 6.3f, 15f, 8f, 15f)
+            horizontalLineTo(11f); verticalLineTo(17f); horizontalLineTo(8f)
+            curveTo(5.2f, 17f, 3f, 14.8f, 3f, 12f); curveTo(3f, 9.2f, 5.2f, 7f, 8f, 7f); close()
+        }
+        solid {
+            moveTo(16f, 7f); horizontalLineTo(13f); verticalLineTo(9f); horizontalLineTo(16f)
+            curveTo(17.7f, 9f, 19f, 10.3f, 19f, 12f); curveTo(19f, 13.7f, 17.7f, 15f, 16f, 15f)
+            horizontalLineTo(13f); verticalLineTo(17f); horizontalLineTo(16f)
+            curveTo(18.8f, 17f, 21f, 14.8f, 21f, 12f); curveTo(21f, 9.2f, 18.8f, 7f, 16f, 7f); close()
+        }
+    }
+
     val Dialpad: ImageVector = icon("dialpad") {
         solid {
             moveTo(5f, 3f); horizontalLineTo(8f); verticalLineTo(6f); horizontalLineTo(5f); close()

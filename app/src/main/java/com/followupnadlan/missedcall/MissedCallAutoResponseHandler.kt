@@ -17,6 +17,7 @@ import com.followupnadlan.postcall.CallLogReader
 import com.followupnadlan.postcall.FollowUpCallType
 import com.followupnadlan.postcall.LatestCallLogEntry
 import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.TemplateStore
 import com.followupnadlan.templates.TemplateTagRenderer
@@ -530,11 +531,14 @@ class MissedCallAutoResponseHandler(private val context: Context) {
 }
 
 internal object MissedCallMessageResolver {
+    // Falls back to the first template when the saved id is orphaned (e.g. its card was
+    // deleted) so the engine never renders an empty message on a real missed call.
     fun selectedTemplate(templates: List<MessageTemplate>, selectedTemplateId: String): MessageTemplate? =
         templates.firstOrNull { it.id == selectedTemplateId }
+            ?: templates.firstOrNull()
 
     fun renderTemplate(template: MessageTemplate?, renderBody: (String) -> String): String =
-        template?.let { renderBody(it.body) }.orEmpty()
+        template?.let { renderBody(MessageComposition.build(it)) }.orEmpty()
 }
 
 internal object FollowUpNumberHistory {

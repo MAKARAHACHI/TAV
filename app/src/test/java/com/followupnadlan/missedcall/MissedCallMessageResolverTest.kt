@@ -22,4 +22,14 @@ class MissedCallMessageResolverTest {
 
         assertEquals("rendered: $customBody", rendered)
     }
+
+    @Test
+    fun orphanedSelectedIdFallsBackToFirstTemplateInsteadOfEmpty() {
+        val selected = MissedCallMessageResolver.selectedTemplate(
+            templates = SprintOneTemplates.all,
+            selectedTemplateId = "deleted-card-id-that-no-longer-exists"
+        )
+
+        assertEquals(SprintOneTemplates.all.first().id, selected?.id)
+    }
 }
