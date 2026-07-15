@@ -301,6 +301,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 callDetectionPreferences.isEnabled(),
                             templates = templates,
                             selectedTemplateId = selectedTemplateId,
+                            preferredWhatsAppPackage = preferredWhatsAppPackage,
                             logStore = logStore,
                             onSaveSelectedMessage = { body ->
                                 TemplateStoreLogic.selectedTemplate(templates, selectedTemplateId)?.let { template ->
@@ -457,6 +458,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         mode = FollowUpPromptModeLogic.fromCallType(missedCallLaunch.callType),
                         templates = templates,
                         selectedTemplateId = selectedTemplateId,
+                        preferredWhatsAppPackage = preferredWhatsAppPackage,
                         askBeforeSend = askBeforeSend,
                         onDone = { modal = AccessibilityModal.NONE }
                     )
@@ -518,6 +520,7 @@ private fun HomeScreen(
     bridgeReady: Boolean,
     templates: List<MessageTemplate>,
     selectedTemplateId: String,
+    preferredWhatsAppPackage: String,
     logStore: FollowUpLogStore,
     onSaveSelectedMessage: (String) -> Unit,
     onToggleBridging: () -> Unit
@@ -644,7 +647,7 @@ private fun HomeScreen(
                                     quickStatus = HomeQuickWhatsAppUiSpec.INVALID_NUMBER
                                 }
                                 is HomeQuickWhatsAppOpenPlan.OpenComposer -> {
-                                    val result = AccessibilityActions.openWhatsApp(context, plan.link)
+                                    val result = AccessibilityActions.openWhatsApp(context, plan.link, preferredWhatsAppPackage)
                                     if (result == null) {
                                         AccessibilityActions.logEntry(context, plan.successLogAction, plan.message, plan.normalizedPhone)
                                         logEntries = logStore.load()
@@ -1135,6 +1138,7 @@ private fun MissedCallPromptScreen(
     mode: FollowUpPromptMode,
     templates: List<MessageTemplate>,
     selectedTemplateId: String,
+    preferredWhatsAppPackage: String,
     askBeforeSend: Boolean,
     onDone: () -> Unit
 ) {
@@ -1227,7 +1231,8 @@ private fun MissedCallPromptScreen(
                 }
                 val result = AccessibilityActions.openWhatsApp(
                     context,
-                    WhatsAppLinkBuilder.build(normalizedPhone, resolvedMessage)
+                    WhatsAppLinkBuilder.build(normalizedPhone, resolvedMessage),
+                    preferredWhatsAppPackage
                 )
                 if (result == null) {
                     AccessibilityActions.logEntry(context, com.followupnadlan.followuplog.FollowUpActionType.WHATSAPP_OPENED, resolvedMessage, phone)

@@ -9,6 +9,7 @@ import com.followupnadlan.followuplog.FollowUpLogEntry
 import com.followupnadlan.followuplog.FollowUpLogStorage
 import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
+import com.followupnadlan.missedcall.WhatsAppPackageResolver
 
 /**
  * Thin intent helpers shared by the accessibility screens. These only open the user's
@@ -16,14 +17,33 @@ import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
  */
 object AccessibilityActions {
 
-    /** Opens WhatsApp (or a browser) on the prepared message. Returns null on success, error text otherwise. */
-    fun openWhatsApp(context: Context, link: String): String? {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
+    /**
+     * Opens WhatsApp on the prepared message. Targets the user's preferred package (regular /
+     * Business) via [setPackage] so it opens the exact app they chose — same behavior the
+     * missed-call engine already uses. Resolves against what is actually installed; if the
+     * targeted app can't open, retries without a package (any installed WhatsApp / browser)
+     * so the user always gets through. Returns null on success, error text otherwise.
+     */
+    fun openWhatsApp(context: Context, link: String, preferredPackage: String = ""): String? {
+        val target = WhatsAppPackageResolver(context.applicationContext)
+            .resolve(preferredPackage)
+            .selectedPackage
+        val uri = Uri.parse(link)
+
+        if (target != null && tryOpen(context, uri, target)) return null
+        // Fallback: no explicit package (whichever WhatsApp is installed, or the browser).
+        if (tryOpen(context, uri, packageName = null)) return null
+        return "לא הצלחנו לפתוח את WhatsApp. אפשר להעתיק את ההודעה ולשלוח ידנית."
+    }
+
+    private fun tryOpen(context: Context, uri: Uri, packageName: String?): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        packageName?.let(intent::setPackage)
         return try {
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            null
+            context.startActivity(intent)
+            true
         } catch (_: ActivityNotFoundException) {
-            "לא הצלחנו לפתוח את WhatsApp. אפשר להעתיק את ההודעה ולשלוח ידנית."
+            false
         }
     }
 
