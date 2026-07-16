@@ -18,12 +18,12 @@ class HomeMessagePreviewLogicTest {
         """.trimIndent()
         val templates = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.PRIVATE_ID to customBody)
+            savedBodiesById = mapOf(SprintOneTemplates.MISSED_ID to customBody)
         )
 
         val preview = HomeMessagePreviewLogic.preview(
             templates = templates,
-            selectedTemplateId = SprintOneTemplates.PRIVATE_ID
+            selectedTemplateId = SprintOneTemplates.MISSED_ID
         )
 
         // Home now shows exactly what will be sent — the full message, not a 3-line teaser.
@@ -69,12 +69,12 @@ class HomeMessagePreviewLogicTest {
         """.trimIndent()
         val templatesAfterSave = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.GENTLE_ID to editedBody)
+            savedBodiesById = mapOf(SprintOneTemplates.ENDED_ID to editedBody)
         )
 
         val preview = HomeMessagePreviewLogic.preview(
             templates = templatesAfterSave,
-            selectedTemplateId = SprintOneTemplates.GENTLE_ID
+            selectedTemplateId = SprintOneTemplates.ENDED_ID
         )
 
         assertEquals("edited saved message\nsecond saved line", preview)
@@ -85,12 +85,12 @@ class HomeMessagePreviewLogicTest {
         val savedMessage = "this is what the caller will receive"
         val templates = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.OPEN_ID to savedMessage)
+            savedBodiesById = mapOf(SprintOneTemplates.ENDED_ID to savedMessage)
         )
 
         val preview = HomeMessagePreviewLogic.preview(
             templates = templates,
-            selectedTemplateId = SprintOneTemplates.OPEN_ID
+            selectedTemplateId = SprintOneTemplates.ENDED_ID
         )
 
         assertEquals(savedMessage, preview)

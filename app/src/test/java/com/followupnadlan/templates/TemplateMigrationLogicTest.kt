@@ -20,9 +20,9 @@ class TemplateMigrationLogicTest {
         val custom = "הנוסח הערוך שלי"
         val migrated = TemplateMigrationLogic.migrate(
             defaults = defaults,
-            oldBodiesById = mapOf(SprintOneTemplates.OPEN_ID to custom)
+            oldBodiesById = mapOf(SprintOneTemplates.ENDED_ID to custom)
         )
-        assertEquals(custom, migrated.first { it.id == SprintOneTemplates.OPEN_ID }.body)
+        assertEquals(custom, migrated.first { it.id == SprintOneTemplates.ENDED_ID }.body)
     }
 
     @Test
@@ -30,17 +30,17 @@ class TemplateMigrationLogicTest {
         val legacyBody = "שלום, שמחתי לדבר איתך לגבי הדירה. מצרף פרטים."
         val migrated = TemplateMigrationLogic.migrate(
             defaults = defaults,
-            oldBodiesById = mapOf(SprintOneTemplates.GENTLE_ID to legacyBody)
+            oldBodiesById = mapOf(SprintOneTemplates.ENDED_ID to legacyBody)
         )
-        val gentleDefault = defaults.first { it.id == SprintOneTemplates.GENTLE_ID }.body
-        assertEquals(gentleDefault, migrated.first { it.id == SprintOneTemplates.GENTLE_ID }.body)
+        val gentleDefault = defaults.first { it.id == SprintOneTemplates.ENDED_ID }.body
+        assertEquals(gentleDefault, migrated.first { it.id == SprintOneTemplates.ENDED_ID }.body)
     }
 
     @Test
     fun migratedTemplatesHaveEmptyLinks() {
         val migrated = TemplateMigrationLogic.migrate(
             defaults = defaults,
-            oldBodiesById = mapOf(SprintOneTemplates.OPEN_ID to "custom")
+            oldBodiesById = mapOf(SprintOneTemplates.ENDED_ID to "custom")
         )
         migrated.forEach {
             assertEquals("", it.cardLink)

@@ -51,18 +51,13 @@ class TemplateStoreTest {
     }
 
     @Test
-    fun editingOpenTemplateSavesAndReloadsCustomBody() {
-        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.OPEN_ID, "custom open body")
+    fun editingEndedTemplateSavesAndReloadsCustomBody() {
+        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.ENDED_ID, "custom ended body")
     }
 
     @Test
-    fun editingGentleTemplateSavesAndReloadsCustomBody() {
-        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.GENTLE_ID, "custom gentle body")
-    }
-
-    @Test
-    fun editingPrivateTemplateSavesAndReloadsCustomBody() {
-        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.PRIVATE_ID, "custom private body")
+    fun editingMissedTemplateSavesAndReloadsCustomBody() {
+        assertSavedAccessibilityBodySurvivesReload(SprintOneTemplates.MISSED_ID, "custom missed body")
     }
 
     @Test
@@ -70,51 +65,36 @@ class TemplateStoreTest {
         val customBody = "selected custom body"
         val templates = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.GENTLE_ID to customBody)
+            savedBodiesById = mapOf(SprintOneTemplates.ENDED_ID to customBody)
         )
 
-        val selected = TemplateStoreLogic.selectedTemplate(templates, SprintOneTemplates.GENTLE_ID)
+        val selected = TemplateStoreLogic.selectedTemplate(templates, SprintOneTemplates.ENDED_ID)
 
         assertEquals(customBody, selected?.body)
     }
 
     @Test
-    fun defaultOpenTemplateReturnsAccessibilityCopy() {
-        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.OPEN_ID }
-        assertEquals("גלוי", template.title)
-        assertEquals(
-            "שלום, אני חירש/ת או כבד/ת שמיעה ולא תמיד יכול/ה לענות לשיחה קולית.\n" +
-                "אפשר לכתוב לי כאן ב־WhatsApp או ב־SMS ואחזור אליך בכתב.",
-            template.body
-        )
+    fun defaultEndedTemplateIsCompletedCallCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.ENDED_ID }
+        assertEquals("סיום שיחה", template.title)
+        assertEquals(TemplateRole.CALL_ENDED, template.role)
+        assert(template.body.startsWith("שלום, שמחתי לשוחח איתך.")) { "unexpected ended body: ${template.body}" }
     }
 
     @Test
-    fun defaultGentleTemplateReturnsAccessibilityCopy() {
-        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.GENTLE_ID }
-        assertEquals("עדין", template.title)
-        assertEquals(
-            "שלום, קשה לי לענות לשיחות קוליות.\n" +
-                "אפשר בבקשה לכתוב לי כאן ב־WhatsApp או ב־SMS?",
-            template.body
-        )
+    fun defaultMissedTemplateIsMissedCallCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.MISSED_ID }
+        assertEquals("שיחה שלא נענתה", template.title)
+        assertEquals(TemplateRole.MISSED_CALL, template.role)
+        // Must not claim to have "seen" the call (no live-read implication).
+        assert(!template.body.contains("ראיתי")) { "missed body must not use 'ראיתי': ${template.body}" }
     }
 
     @Test
-    fun defaultPrivateTemplateReturnsAccessibilityCopy() {
-        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.PRIVATE_ID }
-        assertEquals("פרטי", template.title)
-        assertEquals(
-            "שלום, אני מעדיף/ה תקשורת בכתב.\n" +
-                "אפשר לכתוב לי כאן ואחזור אליך בהודעה.",
-            template.body
-        )
-    }
-
-    @Test
-    fun freshInstallDefaultTemplateIsGentle() {
-        assertEquals(SprintOneTemplates.GENTLE_ID, SprintOneTemplates.DEFAULT_ID)
-        assertEquals("עדין", SprintOneTemplates.all.first { it.id == SprintOneTemplates.DEFAULT_ID }.title)
+    fun freshInstallDefaultsAreEndedAndMissed() {
+        assertEquals(SprintOneTemplates.ENDED_ID, SprintOneTemplates.DEFAULT_ID)
+        assertEquals(SprintOneTemplates.MISSED_ID, SprintOneTemplates.DEFAULT_MISSED_ID)
+        assertEquals(2, SprintOneTemplates.all.size)
     }
 
     @Test

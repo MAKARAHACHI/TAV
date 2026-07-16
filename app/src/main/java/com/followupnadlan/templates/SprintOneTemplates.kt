@@ -1,49 +1,35 @@
 package com.followupnadlan.templates
 
 /**
- * Default missed-call message templates for the "אני זמין/ה בכתב" accessibility app.
+ * Default message templates for the follow-up bridge — one per call scenario.
  *
- * These are the only user-visible default messages. They contain no business /
- * real-estate copy and no template tags — the text is sent as-is. Legacy
- * Nadlan/business templates were removed; see [LegacyTemplateMigration] for how
+ * These are the only user-visible defaults: a completed-call ("סיום שיחה") card and a
+ * missed-call ("שיחה שלא נענתה") card. The copy is profession-neutral (fits a lawyer,
+ * accountant, consultant, therapist…) and carries no name/signature, since the message is
+ * sent as-is with no template tags. Links (digital card / website) live in the template's
+ * own fields and are appended automatically when filled — see [MessageComposition].
+ *
+ * Legacy Nadlan/business templates were removed; see [LegacyTemplateMigration] for how
  * older installs are migrated to these.
  */
 object SprintOneTemplates {
-    const val OPEN_ID = "accessibility_open"
-    const val GENTLE_ID = "accessibility_gentle"
-    const val PRIVATE_ID = "accessibility_private"
-    const val MISSED_ID = "accessibility_missed"
+    const val ENDED_ID = "followup_ended"
+    const val MISSED_ID = "followup_missed"
 
     /** Fresh-install default for completed calls. */
-    const val DEFAULT_ID = GENTLE_ID
+    const val DEFAULT_ID = ENDED_ID
 
     /** Fresh-install default for missed calls. */
     const val DEFAULT_MISSED_ID = MISSED_ID
 
-    val open = MessageTemplate(
-        id = OPEN_ID,
-        title = "גלוי",
+    val ended = MessageTemplate(
+        id = ENDED_ID,
+        title = "סיום שיחה",
+        role = TemplateRole.CALL_ENDED,
         body = """
-            שלום, אני חירש/ת או כבד/ת שמיעה ולא תמיד יכול/ה לענות לשיחה קולית.
-            אפשר לכתוב לי כאן ב־WhatsApp או ב־SMS ואחזור אליך בכתב.
-        """.trimIndent()
-    )
-
-    val gentle = MessageTemplate(
-        id = GENTLE_ID,
-        title = "עדין",
-        body = """
-            שלום, קשה לי לענות לשיחות קוליות.
-            אפשר בבקשה לכתוב לי כאן ב־WhatsApp או ב־SMS?
-        """.trimIndent()
-    )
-
-    val private = MessageTemplate(
-        id = PRIVATE_ID,
-        title = "פרטי",
-        body = """
-            שלום, אני מעדיף/ה תקשורת בכתב.
-            אפשר לכתוב לי כאן ואחזור אליך בהודעה.
+            שלום, שמחתי לשוחח איתך.
+            לכל שאלה, עדכון או שליחת מסמכים נוספים, זהו מספר הוואטסאפ הרשמי שלי (מומלץ לשמור כאיש קשר).
+            נשתמע בהמשך.
         """.trimIndent()
     )
 
@@ -52,10 +38,11 @@ object SprintOneTemplates {
         title = "שיחה שלא נענתה",
         role = TemplateRole.MISSED_CALL,
         body = """
-            שלום, ראיתי שחיפשת אותי ולא הספקתי לענות.
-            אפשר לכתוב לי כאן בקצרה במה מדובר ואחזור אליך בהקדם.
+            שלום, לא הספקתי לענות לשיחה כעת.
+            פנייתך חשובה לי. כדי שאוכל לחזור אליך מוכן וממוקד, אפשר לכתוב לי כאן בקצרה במה מדובר?
+            אשוב אליך בהקדם.
         """.trimIndent()
     )
 
-    val all = listOf(open, gentle, private, missed)
+    val all = listOf(ended, missed)
 }

@@ -8,26 +8,26 @@ import org.junit.Test
 class LegacyTemplateMigrationTest {
 
     @Test
-    fun legacySelectedIdMigratesToGentleDefault() {
+    fun legacySelectedIdMigratesToDefault() {
         LegacyTemplateMigration.LEGACY_TEMPLATE_IDS.forEach { legacyId ->
             assertEquals(
-                "legacy id $legacyId should migrate to gentle default",
-                SprintOneTemplates.GENTLE_ID,
+                "legacy id $legacyId should migrate to default",
+                SprintOneTemplates.DEFAULT_ID,
                 LegacyTemplateMigration.migrateSelectedTemplateId(legacyId)
             )
         }
     }
 
     @Test
-    fun nullSelectedIdResolvesToGentleDefault() {
-        assertEquals(SprintOneTemplates.GENTLE_ID, LegacyTemplateMigration.migrateSelectedTemplateId(null))
+    fun nullSelectedIdResolvesToDefault() {
+        assertEquals(SprintOneTemplates.DEFAULT_ID, LegacyTemplateMigration.migrateSelectedTemplateId(null))
     }
 
     @Test
-    fun accessibilitySelectedIdIsKept() {
+    fun currentSelectedIdIsKept() {
         assertEquals(
-            SprintOneTemplates.PRIVATE_ID,
-            LegacyTemplateMigration.migrateSelectedTemplateId(SprintOneTemplates.PRIVATE_ID)
+            SprintOneTemplates.MISSED_ID,
+            LegacyTemplateMigration.migrateSelectedTemplateId(SprintOneTemplates.MISSED_ID)
         )
     }
 

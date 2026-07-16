@@ -11,12 +11,12 @@ class MissedCallMessageResolverTest {
         val customBody = "saved custom body for missed-call send"
         val templates = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.OPEN_ID to customBody)
+            savedBodiesById = mapOf(SprintOneTemplates.ENDED_ID to customBody)
         )
 
         val selected = MissedCallMessageResolver.selectedTemplate(
             templates = templates,
-            selectedTemplateId = SprintOneTemplates.OPEN_ID
+            selectedTemplateId = SprintOneTemplates.ENDED_ID
         )
         val rendered = MissedCallMessageResolver.renderTemplate(selected) { body -> "rendered: $body" }
 

@@ -106,11 +106,11 @@ class HomeQuickWhatsAppNumberLogicTest {
         val customBody = "custom saved body for WhatsApp"
         val templates = TemplateStoreLogic.applySavedBodies(
             builtInTemplates = SprintOneTemplates.all,
-            savedBodiesById = mapOf(SprintOneTemplates.PRIVATE_ID to customBody)
+            savedBodiesById = mapOf(SprintOneTemplates.MISSED_ID to customBody)
         )
         val selected = TemplateStoreLogic.selectedTemplate(
             templates = templates,
-            selectedTemplateId = SprintOneTemplates.PRIVATE_ID
+            selectedTemplateId = SprintOneTemplates.MISSED_ID
         )
 
         val plan = HomeQuickWhatsAppOpenPlanner.plan(
