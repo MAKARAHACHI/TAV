@@ -74,8 +74,9 @@ import com.followupnadlan.postcall.CallDetectionServiceAction
 import com.followupnadlan.postcall.CallDetectionServiceLifecycle
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
+import com.followupnadlan.templates.TemplateRole
+import com.followupnadlan.templates.TemplateRoleSelector
 import com.followupnadlan.templates.TemplateStore
-import com.followupnadlan.templates.TemplateStoreLogic
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 import com.followupnadlan.whatsapp.WhatsAppLinkBuilder
 
@@ -189,7 +190,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             }
         )
     }
-    var selectedTemplateId by remember { mutableStateOf(settings.selectedTemplateId) }
+    // Default card per call scenario. Missed calls send the "missed" wording; completed
+    // calls (and manual home sends) the "call ended" wording.
+    var selectedEndedId by remember { mutableStateOf(settings.selectedEndedTemplateId) }
+    var selectedMissedId by remember { mutableStateOf(settings.selectedMissedTemplateId) }
     var templates by remember { mutableStateOf(templateStore.loadTemplates()) }
     var phoneStateGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_PHONE_STATE)) }
     var callLogGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CALL_LOG)) }
@@ -300,11 +304,12 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 callLogGranted &&
                                 callDetectionPreferences.isEnabled(),
                             templates = templates,
-                            selectedTemplateId = selectedTemplateId,
+                            selectedEndedId = selectedEndedId,
+                            selectedMissedId = selectedMissedId,
                             preferredWhatsAppPackage = preferredWhatsAppPackage,
                             logStore = logStore,
-                            onSaveSelectedMessage = { body ->
-                                TemplateStoreLogic.selectedTemplate(templates, selectedTemplateId)?.let { template ->
+                            onSaveTemplateBody = { templateId, body ->
+                                templates.firstOrNull { it.id == templateId }?.let { template ->
                                     templateStore.saveTemplate(template.copy(body = body))
                                     templates = templateStore.loadTemplates()
                                 }
@@ -401,28 +406,44 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
 
                     AccessibilityModal.TEMPLATES -> TemplatesScreen(
                         templates = templates,
-                        selectedTemplateId = selectedTemplateId,
-                        onSelectTemplate = { id ->
-                            selectedTemplateId = id
-                            settings.selectedTemplateId = id
+                        selectedEndedId = selectedEndedId,
+                        selectedMissedId = selectedMissedId,
+                        // Choosing a card as default sets the default for that card's own role.
+                        onSelectTemplate = { template ->
+                            when (template.role) {
+                                TemplateRole.CALL_ENDED -> {
+                                    selectedEndedId = template.id
+                                    settings.selectedEndedTemplateId = template.id
+                                }
+                                TemplateRole.MISSED_CALL -> {
+                                    selectedMissedId = template.id
+                                    settings.selectedMissedTemplateId = template.id
+                                }
+                            }
                         },
                         onSaveTemplate = { template ->
                             templateStore.saveTemplate(template)
                             templates = templateStore.loadTemplates()
                         },
-                        onAddTemplate = { title, body, cardLink, websiteLink ->
-                            templateStore.addTemplate(title, body, cardLink, websiteLink)
+                        onAddTemplate = { title, body, cardLink, websiteLink, role ->
+                            templateStore.addTemplate(title, body, cardLink, websiteLink, role)
                             templates = templateStore.loadTemplates()
                         },
                         onDeleteTemplate = { id ->
                             templateStore.deleteTemplate(id)
                             val reloaded = templateStore.loadTemplates()
                             templates = reloaded
-                            // If the default was deleted, fall back to the first remaining card.
-                            if (reloaded.none { it.id == selectedTemplateId }) {
-                                reloaded.firstOrNull()?.let { fallback ->
-                                    selectedTemplateId = fallback.id
-                                    settings.selectedTemplateId = fallback.id
+                            // If a role's default was deleted, fall back to the first card of that role.
+                            if (reloaded.none { it.id == selectedEndedId }) {
+                                (reloaded.firstOrNull { it.role == TemplateRole.CALL_ENDED } ?: reloaded.firstOrNull())?.let {
+                                    selectedEndedId = it.id
+                                    settings.selectedEndedTemplateId = it.id
+                                }
+                            }
+                            if (reloaded.none { it.id == selectedMissedId }) {
+                                (reloaded.firstOrNull { it.role == TemplateRole.MISSED_CALL } ?: reloaded.firstOrNull())?.let {
+                                    selectedMissedId = it.id
+                                    settings.selectedMissedTemplateId = it.id
                                 }
                             }
                         },
@@ -457,7 +478,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         message = missedCallLaunch.message,
                         mode = FollowUpPromptModeLogic.fromCallType(missedCallLaunch.callType),
                         templates = templates,
-                        selectedTemplateId = selectedTemplateId,
+                        selectedEndedId = selectedEndedId,
+                        selectedMissedId = selectedMissedId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
                         askBeforeSend = askBeforeSend,
                         onDone = { modal = AccessibilityModal.NONE }
@@ -519,14 +541,22 @@ private fun HomeScreen(
     statusRows: List<HomeServiceStatusRow>,
     bridgeReady: Boolean,
     templates: List<MessageTemplate>,
-    selectedTemplateId: String,
+    selectedEndedId: String,
+    selectedMissedId: String,
     preferredWhatsAppPackage: String,
     logStore: FollowUpLogStore,
-    onSaveSelectedMessage: (String) -> Unit,
+    onSaveTemplateBody: (templateId: String, body: String) -> Unit,
     onToggleBridging: () -> Unit
 ) {
     val context = LocalContext.current
-    val selectedMessage = TemplateStoreLogic.selectedTemplate(templates, selectedTemplateId)?.body.orEmpty()
+    // The home quick-send isn't tied to a specific call, so the user picks which wording to
+    // use for this manual send. Defaults to the completed-call wording.
+    var homeRole by remember { mutableStateOf(TemplateRole.CALL_ENDED) }
+    val selectedIdForRole = if (homeRole == TemplateRole.MISSED_CALL) selectedMissedId else selectedEndedId
+    val activeTemplate = TemplateRoleSelector.forRole(templates, homeRole, selectedIdForRole)
+    // Full composed message (body + card/website links) — exactly what the preview shows and
+    // what is actually sent. Using .body alone dropped the links from the sent message.
+    val selectedMessage = activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
     var editingMessage by remember { mutableStateOf(false) }
     var quickPhone by remember { mutableStateOf("") }
     var quickPhoneEditing by remember { mutableStateOf(false) }
@@ -613,7 +643,12 @@ private fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 )
-                WhatsAppMessagePreview(message = HomeMessagePreviewLogic.preview(templates, selectedTemplateId), maxLines = 8)
+                TemplateRoleToggle(
+                    selected = homeRole,
+                    onSelect = { homeRole = it },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                WhatsAppMessagePreview(message = selectedMessage, maxLines = 8)
                 OutlinePillButton(
                     text = "ערוך הודעה",
                     onClick = { editingMessage = true },
@@ -713,15 +748,61 @@ private fun HomeScreen(
         }
     }
 
-    if (editingMessage) {
+    if (editingMessage && activeTemplate != null) {
+        // Edit the body only — the links are separate fields and are appended automatically.
+        // Passing the full composed text here would fold the links into the body and duplicate them.
         HomeMessageEditorDialog(
-            message = selectedMessage,
+            message = activeTemplate.body,
             onSave = { body ->
-                onSaveSelectedMessage(body)
+                onSaveTemplateBody(activeTemplate.id, body)
                 editingMessage = false
             },
             onCancel = { editingMessage = false }
         )
+    }
+}
+
+/**
+ * Two-way toggle for the home quick-send: which call scenario's wording to prepare
+ * (missed call vs. completed call). Mirrors the segmented look used elsewhere.
+ */
+@Composable
+private fun TemplateRoleToggle(
+    selected: TemplateRole,
+    onSelect: (TemplateRole) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TemplateRole.entries.forEach { role ->
+            val isSelected = role == selected
+            val label = when (role) {
+                TemplateRole.MISSED_CALL -> "שיחה שלא נענתה"
+                TemplateRole.CALL_ENDED -> "סיום שיחה"
+            }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isSelected) AccessibilityColors.PrimaryContainer else Color.Transparent,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isSelected) AccessibilityColors.Primary else AccessibilityColors.TextFaint
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSelect(role) }
+            ) {
+                Text(
+                    text = label,
+                    color = if (isSelected) AccessibilityColors.Primary else AccessibilityColors.TextBody,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp).fillMaxWidth()
+                )
+            }
+        }
     }
 }
 
@@ -901,10 +982,11 @@ internal object TemplateCardSummary {
 @Composable
 private fun TemplatesScreen(
     templates: List<MessageTemplate>,
-    selectedTemplateId: String,
-    onSelectTemplate: (String) -> Unit,
+    selectedEndedId: String,
+    selectedMissedId: String,
+    onSelectTemplate: (MessageTemplate) -> Unit,
     onSaveTemplate: (MessageTemplate) -> Unit,
-    onAddTemplate: (String, String, String, String) -> Unit,
+    onAddTemplate: (String, String, String, String, TemplateRole) -> Unit,
     onDeleteTemplate: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -920,23 +1002,24 @@ private fun TemplatesScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ModalHeader(title = "הודעת ברירת מחדל", onBack = onBack)
+        ModalHeader(title = "הודעות ברירת מחדל", onBack = onBack)
 
         when {
             creatingNew || editing != null -> {
                 val target = editing
                 TemplateCardEditor(
                     template = target,
-                    onSave = { title, body, cardLink, websiteLink ->
+                    onSave = { title, body, cardLink, websiteLink, role ->
                         if (target == null) {
-                            onAddTemplate(title, body, cardLink, websiteLink)
+                            onAddTemplate(title, body, cardLink, websiteLink, role)
                         } else {
                             onSaveTemplate(
                                 target.copy(
                                     title = title,
                                     body = body,
                                     cardLink = cardLink,
-                                    websiteLink = websiteLink
+                                    websiteLink = websiteLink,
+                                    role = role
                                 )
                             )
                         }
@@ -951,20 +1034,33 @@ private fun TemplatesScreen(
             }
             else -> {
                 Text(
-                    text = "בחר/י את הכרטיסייה שתישלח כברירת מחדל, או צור/י חדשה.",
+                    text = "לכל תרחיש שיחה יש הודעת ברירת מחדל. בחר/י את הכרטיסייה שתישלח, או צור/י חדשה.",
                     fontSize = 14.sp,
                     color = AccessibilityColors.TextMuted,
                     modifier = Modifier.fillMaxWidth()
                 )
-                templates.forEach { template ->
-                    TemplateCard(
-                        template = template,
-                        selected = template.id == selectedTemplateId,
-                        canDelete = templates.size > 1,
-                        onClick = { onSelectTemplate(template.id) },
-                        onEdit = { editing = template },
-                        onDelete = { onDeleteTemplate(template.id) }
+                // Grouped by scenario so the two defaults (missed / ended) are clearly separate.
+                TemplateRole.entries.forEach { role ->
+                    val group = templates.filter { it.role == role }
+                    if (group.isEmpty()) return@forEach
+                    val selectedIdForRole = if (role == TemplateRole.MISSED_CALL) selectedMissedId else selectedEndedId
+                    Text(
+                        text = templateRoleLabel(role),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccessibilityColors.Heading,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
                     )
+                    group.forEach { template ->
+                        TemplateCard(
+                            template = template,
+                            selected = template.id == selectedIdForRole,
+                            canDelete = templates.size > 1,
+                            onClick = { onSelectTemplate(template) },
+                            onEdit = { editing = template },
+                            onDelete = { onDeleteTemplate(template.id) }
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 OutlinePillButton(
@@ -977,6 +1073,12 @@ private fun TemplatesScreen(
             }
         }
     }
+}
+
+/** Hebrew label for a template's call scenario. */
+private fun templateRoleLabel(role: TemplateRole): String = when (role) {
+    TemplateRole.MISSED_CALL -> "שיחה שלא נענתה"
+    TemplateRole.CALL_ENDED -> "סיום שיחה"
 }
 
 @Composable
@@ -1055,13 +1157,14 @@ private fun TemplateCard(
 @Composable
 private fun TemplateCardEditor(
     template: MessageTemplate?,
-    onSave: (String, String, String, String) -> Unit,
+    onSave: (String, String, String, String, TemplateRole) -> Unit,
     onCancel: () -> Unit
 ) {
     var title by remember(template?.id) { mutableStateOf(template?.title.orEmpty()) }
     var body by remember(template?.id) { mutableStateOf(template?.body.orEmpty()) }
     var cardLink by remember(template?.id) { mutableStateOf(template?.cardLink.orEmpty()) }
     var websiteLink by remember(template?.id) { mutableStateOf(template?.websiteLink.orEmpty()) }
+    var role by remember(template?.id) { mutableStateOf(template?.role ?: TemplateRole.CALL_ENDED) }
     var error by remember(template?.id) { mutableStateOf<String?>(null) }
 
     AppCard(modifier = Modifier.fillMaxWidth()) {
@@ -1071,6 +1174,12 @@ private fun TemplateCardEditor(
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
                 color = AccessibilityColors.Heading
+            )
+            Text("מתי לשלוח את ההודעה?", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextMuted)
+            TemplateRoleToggle(
+                selected = role,
+                onSelect = { role = it },
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = title,
@@ -1120,7 +1229,7 @@ private fun TemplateCardEditor(
                             error = "כותרת ונוסח הם שדות חובה"
                             return@PillButton
                         }
-                        onSave(trimmedTitle, body, cardLink.trim(), websiteLink.trim())
+                        onSave(trimmedTitle, body, cardLink.trim(), websiteLink.trim(), role)
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -1137,19 +1246,25 @@ private fun MissedCallPromptScreen(
     message: String,
     mode: FollowUpPromptMode,
     templates: List<MessageTemplate>,
-    selectedTemplateId: String,
+    selectedEndedId: String,
+    selectedMissedId: String,
     preferredWhatsAppPackage: String,
     askBeforeSend: Boolean,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
-    // Manual "ask me" mode with more than one card lets the user pick a different template
-    // for this send only (it does not change the saved default).
-    val showSelector = askBeforeSend && templates.size > 1
-    var activeId by remember(selectedTemplateId) { mutableStateOf(selectedTemplateId) }
-    val activeTemplate = templates.firstOrNull { it.id == activeId }
-        ?: templates.firstOrNull { it.id == selectedTemplateId }
-        ?: templates.firstOrNull()
+    // Wording follows the call scenario: a missed call uses the "missed" cards, a completed
+    // call the "call ended" cards.
+    val role = if (mode == FollowUpPromptMode.MISSED_CALL) TemplateRole.MISSED_CALL else TemplateRole.CALL_ENDED
+    val roleTemplates = templates.filter { it.role == role }
+    val selectedIdForRole = if (role == TemplateRole.MISSED_CALL) selectedMissedId else selectedEndedId
+    // Manual "ask me" mode with more than one card of this role lets the user pick a different
+    // card for this send only (it does not change the saved default).
+    val showSelector = askBeforeSend && roleTemplates.size > 1
+    val defaultTemplate = TemplateRoleSelector.forRole(templates, role, selectedIdForRole)
+    var activeId by remember(selectedIdForRole, role) { mutableStateOf(defaultTemplate?.id.orEmpty()) }
+    val activeTemplate = roleTemplates.firstOrNull { it.id == activeId }
+        ?: defaultTemplate
     val templateMessage = if (showSelector) {
         activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
     } else {
@@ -1193,7 +1308,7 @@ private fun MissedCallPromptScreen(
         if (showSelector) {
             Spacer(modifier = Modifier.height(16.dp))
             TemplateChipRow(
-                templates = templates,
+                templates = roleTemplates,
                 selectedId = activeId,
                 onSelect = { activeId = it },
                 modifier = Modifier.fillMaxWidth()

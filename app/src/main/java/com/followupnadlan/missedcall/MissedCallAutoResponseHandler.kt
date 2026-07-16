@@ -19,6 +19,8 @@ import com.followupnadlan.postcall.LatestCallLogEntry
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
+import com.followupnadlan.templates.TemplateRole
+import com.followupnadlan.templates.TemplateRoleSelector
 import com.followupnadlan.templates.TemplateStore
 import com.followupnadlan.templates.TemplateTagRenderer
 import com.followupnadlan.templates.TemplateTagValues
@@ -496,9 +498,12 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private fun evaluateCandidate(candidate: MissedCallCandidate, now: Long): MissedCallEvaluation {
         val phone = candidate.phoneNumber.orEmpty()
         val normalizedPhone = PhoneNumberNormalizer.normalizeForWhatsApp(phone)
-        val template = MissedCallMessageResolver.selectedTemplate(
+        // The engine only fires on missed incoming calls, so it always sends the missed-call
+        // wording (falls back to any card if the user has none of that role — see selector).
+        val template = TemplateRoleSelector.forRole(
             templates = templateStore.loadTemplates(),
-            selectedTemplateId = settings.selectedTemplateId
+            role = TemplateRole.MISSED_CALL,
+            selectedIdForRole = settings.selectedMissedTemplateId
         )
         val message = MissedCallMessageResolver.renderTemplate(template, ::renderMessage)
         val whatsappPackages = whatsAppPackageResolver.resolve(settings.preferredWhatsAppPackage)

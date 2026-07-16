@@ -73,7 +73,7 @@ class SelfTestChecker(private val context: Context) {
             } else {
                 CheckState.OPTIONAL_MISSING
             },
-            CheckId.MISSED_CALL_TEMPLATE to if (TemplateStore(context).loadTemplates().any { it.id == missedCallSettings.selectedTemplateId }) {
+            CheckId.MISSED_CALL_TEMPLATE to if (TemplateStore(context).loadTemplates().any { it.id == missedCallSettings.selectedEndedTemplateId || it.id == missedCallSettings.selectedMissedTemplateId }) {
                 CheckState.PASS
             } else {
                 CheckState.FAIL

@@ -13,11 +13,22 @@ class MissedCallAutoResponseSettings(context: Context) {
             preferences.edit().putBoolean(KEY_ENABLED, value).apply()
         }
 
-    var selectedTemplateId: String
+    /**
+     * Default card for completed calls. Kept under the original key so an existing user's
+     * chosen template stays their "call ended" default with no migration step.
+     */
+    var selectedEndedTemplateId: String
         // Remap a stored legacy Nadlan/business template id to the accessibility default.
         get() = LegacyTemplateMigration.migrateSelectedTemplateId(preferences.getString(KEY_TEMPLATE_ID, null))
         set(value) {
             preferences.edit().putString(KEY_TEMPLATE_ID, value).commit()
+        }
+
+    /** Default card for missed calls. Falls back to the fresh-install missed default. */
+    var selectedMissedTemplateId: String
+        get() = preferences.getString(KEY_MISSED_TEMPLATE_ID, null) ?: SprintOneTemplates.DEFAULT_MISSED_ID
+        set(value) {
+            preferences.edit().putString(KEY_MISSED_TEMPLATE_ID, value).commit()
         }
 
     var primaryChannel: MissedCallResponsePrimaryChannel
@@ -74,6 +85,7 @@ class MissedCallAutoResponseSettings(context: Context) {
         private const val PREFERENCES_NAME = "missed_call_auto_response_settings"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_TEMPLATE_ID = "template_id"
+        private const val KEY_MISSED_TEMPLATE_ID = "missed_template_id"
         private const val KEY_PRIMARY_CHANNEL = "primary_channel"
         private const val KEY_WHATSAPP_MODE = "whatsapp_mode"
         private const val KEY_WHATSAPP_AUTOMATION_ENABLED = "whatsapp_automation_enabled"

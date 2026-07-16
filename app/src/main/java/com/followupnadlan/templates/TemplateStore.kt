@@ -35,14 +35,16 @@ class TemplateStore(context: Context) {
         title: String,
         body: String,
         cardLink: String = "",
-        websiteLink: String = ""
+        websiteLink: String = "",
+        role: TemplateRole = TemplateRole.CALL_ENDED
     ): MessageTemplate {
         val template = MessageTemplate(
             id = UUID.randomUUID().toString(),
             title = title,
             body = body,
             cardLink = cardLink,
-            websiteLink = websiteLink
+            websiteLink = websiteLink,
+            role = role
         )
         persist(loadTemplates() + template)
         return template
@@ -128,7 +130,8 @@ internal object TemplateCodec {
                 template.title,
                 template.body,
                 template.cardLink,
-                template.websiteLink
+                template.websiteLink,
+                template.role.name
             ).joinToString(FIELD_SEPARATOR) { encodeValue(it) }
         }
 
@@ -148,7 +151,11 @@ internal object TemplateCodec {
             title = decodeValue(fields[1]),
             body = decodeValue(fields[2]),
             cardLink = fields.getOrNull(3)?.let(::decodeValue).orEmpty(),
-            websiteLink = fields.getOrNull(4)?.let(::decodeValue).orEmpty()
+            websiteLink = fields.getOrNull(4)?.let(::decodeValue).orEmpty(),
+            // Older lines have no role field → default to CALL_ENDED (existing behavior).
+            role = fields.getOrNull(5)?.let(::decodeValue)
+                ?.let { name -> runCatching { TemplateRole.valueOf(name) }.getOrNull() }
+                ?: TemplateRole.CALL_ENDED
         )
     }
 
