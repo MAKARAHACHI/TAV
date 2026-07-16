@@ -72,6 +72,10 @@ import com.followupnadlan.postcall.CallDetectionPreferences
 import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.postcall.CallDetectionServiceAction
 import com.followupnadlan.postcall.CallDetectionServiceLifecycle
+import com.followupnadlan.profile.ContactCard
+import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.sharing.ContactCardShareResult
+import com.followupnadlan.sharing.PrepareAndShareContactCard
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.TemplateRole
@@ -90,6 +94,7 @@ internal enum class AccessibilityModal {
     TEMPLATES,
     EXCLUSIONS,
     ALLOWED_RECIPIENTS,
+    CONTACT_CARD,
     MISSED_CALL_PROMPT
 }
 
@@ -162,6 +167,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
+    val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
 
     var tab by remember { mutableStateOf(AccessibilityTab.HOME) }
     var modal by remember {
@@ -375,6 +381,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
                             onOpenAllowedRecipients = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
                             onOpenTemplates = { modal = AccessibilityModal.TEMPLATES },
+                            onOpenContactCard = { modal = AccessibilityModal.CONTACT_CARD },
                             onDeleteHistory = { logStore.clear() },
                             diagnosticsSnapshot = diagnosticsSnapshot
                         )
@@ -473,6 +480,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         onBack = { modal = AccessibilityModal.NONE; recipientsRefresh++ }
                     )
 
+                    AccessibilityModal.CONTACT_CARD -> ContactCardScreen(
+                        store = myDetailsStore,
+                        onBack = { modal = AccessibilityModal.NONE }
+                    )
+
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
                         message = missedCallLaunch.message,
@@ -482,6 +494,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         selectedMissedId = selectedMissedId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
                         askBeforeSend = askBeforeSend,
+                        onOpenContactCardSettings = { modal = AccessibilityModal.CONTACT_CARD },
                         onDone = { modal = AccessibilityModal.NONE }
                     )
                 }
@@ -1250,9 +1263,16 @@ private fun MissedCallPromptScreen(
     selectedMissedId: String,
     preferredWhatsAppPackage: String,
     askBeforeSend: Boolean,
+    onOpenContactCardSettings: () -> Unit,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
+    // Contact-card share is independent of the message send: it reuses the saved "my details"
+    // and opens WhatsApp with a .vcf attached; the user picks the chat and taps send themselves.
+    val shareContactCard = remember(context) { PrepareAndShareContactCard(context) }
+    val contactCardComplete = remember(context) {
+        ContactCard.fromProfile(MyDetailsStore(context.applicationContext).load()).isComplete
+    }
     // Wording follows the call scenario: a missed call uses the "missed" cards, a completed
     // call the "call ended" cards.
     val role = if (mode == FollowUpPromptMode.MISSED_CALL) TemplateRole.MISSED_CALL else TemplateRole.CALL_ENDED
@@ -1359,6 +1379,50 @@ private fun MissedCallPromptScreen(
             background = AccessibilityColors.Green,
             leadingIcon = AccessibilityIcons.Chat
         )
+
+        // Share the business owner's own contact card (vCard). Always visible so the feature is
+        // discoverable; disabled with a CTA when the card details haven't been filled in yet.
+        Spacer(modifier = Modifier.height(11.dp))
+        PillButton(
+            text = "שלח כרטיס איש קשר",
+            enabled = contactCardComplete,
+            onClick = {
+                when (val result = shareContactCard(preferredWhatsAppPackage)) {
+                    is ContactCardShareResult.Opened -> status = null
+                    ContactCardShareResult.IncompleteProfile -> onOpenContactCardSettings()
+                    is ContactCardShareResult.Failed -> status = result.userMessage
+                }
+            },
+            background = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.PersonAdd
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        if (contactCardComplete) {
+            Text(
+                text = "ייפתח WhatsApp עם הכרטיס מצורף — בחר/י את השיחה ולחץ/י שלח.",
+                fontSize = 12.sp,
+                color = AccessibilityColors.TextMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text(
+                text = "כדי להפעיל, מלא/י שם וטלפון בכרטיס איש הקשר.",
+                fontSize = 12.sp,
+                color = AccessibilityColors.TextMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinePillButton(
+                text = "מילוי פרטי הכרטיס",
+                onClick = onOpenContactCardSettings,
+                borderColor = AccessibilityColors.Primary,
+                contentColor = AccessibilityColors.Primary,
+                leadingIcon = AccessibilityIcons.PersonAdd
+            )
+        }
+
         Spacer(modifier = Modifier.height(11.dp))
         PillButton(
             text = "שלח ב־SMS",
@@ -1588,6 +1652,7 @@ private fun SettingsScreen(
     onOpenExclusions: () -> Unit,
     onOpenAllowedRecipients: () -> Unit,
     onOpenTemplates: () -> Unit,
+    onOpenContactCard: () -> Unit,
     onDeleteHistory: () -> Unit,
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot
 ) {
@@ -1755,6 +1820,16 @@ private fun SettingsScreen(
             )
         }
 
+        // "My contact card" entry — the details shared as a vCard on request.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            NavigationRowContent(
+                label = "כרטיס איש הקשר שלי",
+                leadingIcon = AccessibilityIcons.PersonAdd,
+                leadingTint = AccessibilityColors.Primary,
+                onClick = onOpenContactCard
+            )
+        }
+
         // Delete history
         AppCard(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -1771,6 +1846,152 @@ private fun SettingsScreen(
         }
         if (deleted) {
             Text("ההיסטוריה נמחקה.", color = AccessibilityColors.Primary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp))
+        }
+    }
+}
+
+// ===================== SCREEN — MY CONTACT CARD =====================
+@Composable
+private fun ContactCardScreen(
+    store: MyDetailsStore,
+    onBack: () -> Unit
+) {
+    // Loaded once as the base; copy() preserves the other MyDetails fields on save/clear.
+    val profile = remember { store.load() }
+    var fullName by remember { mutableStateOf(profile.agentName) }
+    var org by remember { mutableStateOf(profile.officeName) }
+    var phone by remember { mutableStateOf(profile.phone) }
+    var savedMessage by remember { mutableStateOf<String?>(null) }
+
+    val card = ContactCard(fullName = fullName, org = org, phone = phone)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ModalHeader(title = "כרטיס איש הקשר שלי", onBack = onBack)
+        Text(
+            text = "מלא/י את הפרטים פעם אחת כדי שאפשר יהיה לשלוח אותם ככרטיס איש קשר אחרי שיחה. " +
+                "הפרטים נשמרים במכשיר בלבד.",
+            fontSize = 14.sp,
+            color = AccessibilityColors.TextMuted,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = fullName,
+            onValueChange = { fullName = it; savedMessage = null },
+            label = { Text("שם מלא") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = phone,
+            onValueChange = { phone = it; savedMessage = null },
+            label = { Text("טלפון") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = org,
+            onValueChange = { org = it; savedMessage = null },
+            label = { Text("שם משרד (לא חובה)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Text("תצוגה מקדימה", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextMuted)
+        ContactCardPreview(card)
+        Text(
+            text = "כך ייראה הכרטיס אצל מי שיקבל אותו.",
+            fontSize = 12.sp,
+            color = AccessibilityColors.TextMuted,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        if (!card.isComplete) {
+            CaptionWithIcon(
+                text = "כדי לשלוח כרטיס צריך לפחות שם וטלפון.",
+                icon = AccessibilityIcons.Block,
+                color = AccessibilityColors.TextMuted
+            )
+        }
+
+        PillButton(
+            text = "שמור",
+            onClick = {
+                val trimmed = profile.copy(
+                    agentName = fullName.trim(),
+                    officeName = org.trim(),
+                    phone = phone.trim()
+                )
+                store.save(trimmed)
+                fullName = trimmed.agentName
+                org = trimmed.officeName
+                phone = trimmed.phone
+                savedMessage = "פרטי הכרטיס נשמרו"
+            }
+        )
+        OutlinePillButton(
+            text = "מחק פרטי כרטיס",
+            onClick = {
+                store.save(profile.copy(agentName = "", officeName = "", phone = ""))
+                fullName = ""
+                org = ""
+                phone = ""
+                savedMessage = "פרטי הכרטיס נמחקו"
+            },
+            borderColor = AccessibilityColors.Danger,
+            contentColor = AccessibilityColors.Danger,
+            leadingIcon = AccessibilityIcons.Delete
+        )
+        savedMessage?.let {
+            Text(it, color = AccessibilityColors.Primary, fontSize = 13.sp, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** A recipient's-eye preview of the contact card (name / office / phone). */
+@Composable
+private fun ContactCardPreview(card: ContactCard) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = AccessibilityColors.SubtleSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AccessibilityColors.CardBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircleAvatar(
+                background = AccessibilityColors.PrimaryContainer,
+                icon = AccessibilityIcons.Person,
+                iconTint = AccessibilityColors.Primary,
+                boxSize = 46
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = card.fullName.ifBlank { "שם מלא" },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = if (card.fullName.isBlank()) AccessibilityColors.TextFaint else AccessibilityColors.TextStrong
+                )
+                if (card.org.isNotBlank()) {
+                    Text(card.org, fontSize = 13.sp, color = AccessibilityColors.TextMuted)
+                }
+                Text(
+                    text = card.phone.ifBlank { "טלפון" },
+                    fontSize = 14.sp,
+                    color = if (card.phone.isBlank()) AccessibilityColors.TextFaint else AccessibilityColors.TextBody
+                )
+            }
         }
     }
 }

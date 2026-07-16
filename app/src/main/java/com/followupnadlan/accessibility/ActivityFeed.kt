@@ -69,6 +69,9 @@ object ActivityFeed {
         FollowUpActionType.MANUAL_SMS_COMPOSER_OPENED ->
             Triple(AccessibilityIcons.Sms, AccessibilityColors.Primary, "נפתחה הודעת SMS לאישור")
 
+        FollowUpActionType.CONTACT_CARD_OPENED ->
+            Triple(AccessibilityIcons.PersonAdd, AccessibilityColors.Primary, "נפתח שיתוף כרטיס איש קשר")
+
         FollowUpActionType.MANUAL_REPLY_PENDING ->
             Triple(AccessibilityIcons.Schedule, AccessibilityColors.Warning, "ממתין לאישור שלך")
 
