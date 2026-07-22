@@ -28,10 +28,10 @@ class ActivityFeedTest {
     }
 
     @Test
-    fun contactsOnlyShowsNoContactsPermissionRow() {
+    fun contactsOnlyShowsChosenContactsOnlyRow() {
         val rows = ActivityFeed.rows(listOf(entry(FollowUpActionType.AUTO_SMS_SKIPPED_CONTACTS_ONLY)), utc)
         assertEquals(1, rows.size)
-        assertEquals("לא נשלח — אין הרשאת אנשי קשר כדי לוודא שהמספר שמור", rows.first().title)
+        assertEquals("לא נשלח — בחרת לשלוח רק לאנשי קשר שמורים", rows.first().title)
     }
 
     @Test
@@ -53,10 +53,29 @@ class ActivityFeedTest {
             utc
         )
 
-        assertTrue(rows.any { it.title == "לא נשלח — אנשי קשר חסומים בהגדרה שלך" })
-        assertTrue(rows.any { it.title == "לא נשלח — מספרים לא שמורים חסומים בהגדרה שלך" })
-        assertTrue(rows.any { it.title == "לא נשלח — מספר חדש בפעם הראשונה" })
-        assertTrue(rows.any { it.title == "לא נשלח — אין הרשאת אנשי קשר כדי לוודא את סוג המספר." })
+        assertTrue(rows.any { it.title == "לא נשלח — בחרת לא לשלוח לאנשי קשר שמורים" })
+        assertTrue(rows.any { it.title == "לא נשלח — בחרת לא לשלוח למספרים לא שמורים" })
+        assertTrue(rows.any { it.title == "לא נשלח — זו הפעם הראשונה מהמספר הזה" })
+        assertTrue(rows.any { it.title == "לא נשלח — המספר לא מתאים להגדרות השליחה" })
+    }
+
+    @Test
+    fun everySkipCodeShowsOnePlainNotSentSentenceWithoutJargon() {
+        // Plan §1/§3(ג): every SKIP outcome the user can see must render as one plain
+        // "לא נשלח — <סיבה>" sentence, with no technical term and no dangling internal detail.
+        val skipTypes = FollowUpActionType.values().filter { it.name.startsWith("AUTO_SMS_SKIPPED_") }
+        val jargon = listOf("הרשאה", "הרשאת", "סוג המספר", "כפילויות", "template", "permission")
+
+        skipTypes.forEach { type ->
+            val rows = ActivityFeed.rows(listOf(entry(type)), utc)
+            assertEquals("SKIP code ${type.name} must render exactly one row", 1, rows.size)
+            val title = rows.first().title
+            assertTrue("SKIP code ${type.name} must start with 'לא נשלח —': $title", title.startsWith("לא נשלח —"))
+            jargon.forEach { term ->
+                assertFalse("SKIP code ${type.name} leaked jargon '$term': $title", title.contains(term))
+            }
+            assertFalse("SKIP code ${type.name} ends with a stray period: $title", title.trimEnd().endsWith("."))
+        }
     }
 
     @Test

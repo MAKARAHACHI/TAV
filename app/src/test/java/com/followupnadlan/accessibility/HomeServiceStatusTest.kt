@@ -2,6 +2,7 @@ package com.followupnadlan.accessibility
 
 import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
 import com.followupnadlan.missedcall.MissedCallWhatsAppMode
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -137,6 +138,106 @@ class HomeServiceStatusTest {
         }
     }
 
+    // ===================== Stage 2a — single status line (plan §1 severity order) =====================
+
+    @Test
+    fun statusLineHealthyWhenEverythingReady() {
+        val line = HomeServiceStatus.statusLine(defaultInput())
+        assertEquals(HomeServiceStatus.HEALTHY_LINE, line.label)
+        assertEquals(HomeServiceStatusTone.ACTIVE, line.tone)
+    }
+
+    @Test
+    fun statusLineDetectionPermissionRanksFirst() {
+        // Even with the bridge off and no template, missing detection permission wins.
+        val line = HomeServiceStatus.statusLine(
+            defaultInput(readPhoneStateGranted = false, bridgeEnabled = false, hasTemplate = false)
+        )
+        assertTrue(line.label.contains("זיהוי שיחות"))
+        assertEquals(HomeServiceStatusTone.DISABLED, line.tone)
+    }
+
+    @Test
+    fun statusLineBridgeOffRanksBeforeTemplate() {
+        val line = HomeServiceStatus.statusLine(defaultInput(bridgeEnabled = false, hasTemplate = false))
+        assertTrue(line.label.contains("כבוי"))
+        assertEquals(HomeServiceStatusTone.DISABLED, line.tone)
+    }
+
+    @Test
+    fun statusLineNoTemplateBlocks() {
+        val line = HomeServiceStatus.statusLine(defaultInput(hasTemplate = false))
+        assertTrue(line.label.contains("הודעה"))
+        assertEquals(HomeServiceStatusTone.DISABLED, line.tone)
+    }
+
+    @Test
+    fun statusLinePrimaryChannelUnreachableBlocks() {
+        // WhatsApp-first, WhatsApp missing, no SMS fallback → primary route unreachable.
+        val line = HomeServiceStatus.statusLine(
+            defaultInput(
+                primaryChannel = MissedCallResponsePrimaryChannel.WHATSAPP_FIRST,
+                whatsappAvailable = false,
+                smsFallbackEnabled = false
+            )
+        )
+        assertTrue(line.label.contains("WhatsApp לא זמין"))
+        assertEquals(HomeServiceStatusTone.DISABLED, line.tone)
+    }
+
+    @Test
+    fun statusLineWhatsappFirstWithSmsFallbackStaysHealthy() {
+        val line = HomeServiceStatus.statusLine(
+            defaultInput(
+                primaryChannel = MissedCallResponsePrimaryChannel.WHATSAPP_FIRST,
+                whatsappAvailable = false,
+                smsFallbackEnabled = true
+            )
+        )
+        assertEquals(HomeServiceStatus.HEALTHY_LINE, line.label)
+    }
+
+    @Test
+    fun statusLineAutoModeWithoutConsentBlocks() {
+        val line = HomeServiceStatus.statusLine(
+            defaultInput(
+                whatsappMode = MissedCallWhatsAppMode.ACCESSIBILITY_AUTO,
+                autoSendConsentGranted = false
+            )
+        )
+        assertTrue(line.label.contains("אישור"))
+        assertEquals(HomeServiceStatusTone.DISABLED, line.tone)
+    }
+
+    @Test
+    fun statusLineManualModeIgnoresAutoConsent() {
+        // Manual mode never auto-sends, so missing accessibility consent does not block it.
+        val line = HomeServiceStatus.statusLine(
+            defaultInput(
+                whatsappMode = MissedCallWhatsAppMode.PREPARED_MANUAL,
+                autoSendConsentGranted = false
+            )
+        )
+        assertEquals(HomeServiceStatus.HEALTHY_LINE, line.label)
+    }
+
+    @Test
+    fun statusLineHasNoTechnicalTerms() {
+        val banned = listOf("נגישות", "AccessibilityService", "template", "PREPARED_MANUAL", "ACCESSIBILITY_AUTO")
+        val lines = listOf(
+            defaultInput(readPhoneStateGranted = false),
+            defaultInput(bridgeEnabled = false),
+            defaultInput(hasTemplate = false),
+            defaultInput(whatsappAvailable = false, smsFallbackEnabled = false),
+            defaultInput(whatsappMode = MissedCallWhatsAppMode.ACCESSIBILITY_AUTO, autoSendConsentGranted = false),
+            defaultInput()
+        ).map { HomeServiceStatus.statusLine(it).label }
+
+        banned.forEach { term ->
+            assertFalse("status line leaked technical term $term", lines.any { it.contains(term) })
+        }
+    }
+
     private fun labels(input: HomeServiceStatusInput): List<String> =
         HomeServiceStatus.rows(input).map { it.label }
 
@@ -148,7 +249,9 @@ class HomeServiceStatusTest {
         smsFallbackEnabled: Boolean = true,
         readPhoneStateGranted: Boolean = true,
         readCallLogGranted: Boolean = true,
-        detectorEnabled: Boolean = true
+        detectorEnabled: Boolean = true,
+        autoSendConsentGranted: Boolean = true,
+        hasTemplate: Boolean = true
     ): HomeServiceStatusInput =
         HomeServiceStatusInput(
             bridgeEnabled = bridgeEnabled,
@@ -158,6 +261,8 @@ class HomeServiceStatusTest {
             smsFallbackEnabled = smsFallbackEnabled,
             readPhoneStateGranted = readPhoneStateGranted,
             readCallLogGranted = readCallLogGranted,
-            detectorEnabled = detectorEnabled
+            detectorEnabled = detectorEnabled,
+            autoSendConsentGranted = autoSendConsentGranted,
+            hasTemplate = hasTemplate
         )
 }

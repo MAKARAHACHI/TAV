@@ -82,16 +82,16 @@ object ActivityFeed {
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — בחרת לא לשלוח למספר הזה")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_BLOCKED_CONTACT ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — אנשי קשר חסומים בהגדרה שלך")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — בחרת לא לשלוח לאנשי קשר שמורים")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_BLOCKED_NON_CONTACT ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — מספרים לא שמורים חסומים בהגדרה שלך")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — בחרת לא לשלוח למספרים לא שמורים")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_FIRST_TIME ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — מספר חדש בפעם הראשונה")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — זו הפעם הראשונה מהמספר הזה")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_CONTACT_TYPE_UNVERIFIED ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — אין הרשאת אנשי קשר כדי לוודא את סוג המספר.")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — המספר לא מתאים להגדרות השליחה")
 
         FollowUpActionType.WHATSAPP_REPLY_FAILED,
         FollowUpActionType.WHATSAPP_AUTO_FAILED ->
@@ -105,15 +105,21 @@ object ActivityFeed {
             Triple(AccessibilityIcons.Schedule, AccessibilityColors.Warning, "לא נשלח — נשלחה כבר הודעה למספר הזה לאחרונה")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_CONTACTS_ONLY ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — אין הרשאת אנשי קשר כדי לוודא שהמספר שמור")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — בחרת לשלוח רק לאנשי קשר שמורים")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_NOT_ALLOWED ->
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — המספר לא נמצא ברשימת המותרים")
 
-        FollowUpActionType.AUTO_SMS_SKIPPED_NO_NUMBER,
+        FollowUpActionType.AUTO_SMS_SKIPPED_NO_NUMBER ->
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — לא זוהה מספר תקין")
+
+        // NO_PERMISSION / DISABLED are recoverable system states, but the fix belongs on the
+        // home status line (HomeServiceStatus: "חסרה הרשאה" / "כבוי"), not inside a per-call feed
+        // row. Here we only say it didn't go out, and point at the app state — no jargon, no
+        // false "המספר לא מתאים" blame on the number. (Plan §3ג + jargon guard in ActivityFeedTest.)
         FollowUpActionType.AUTO_SMS_SKIPPED_NO_PERMISSION,
         FollowUpActionType.AUTO_SMS_SKIPPED_DISABLED ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — המספר לא מתאים להגדרות השליחה")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.Warning, "לא נשלח — צריך להשלים הגדרה באפליקציה")
 
         else -> null
     }

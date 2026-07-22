@@ -65,6 +65,7 @@ import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
 import com.followupnadlan.missedcall.MissedCallWhatsAppMode
+import com.followupnadlan.missedcall.WhatsAppAutoSendController
 import com.followupnadlan.missedcall.WhatsAppPackageResolver
 import com.followupnadlan.postcall.CallDetectionDiagnostics
 import com.followupnadlan.postcall.CallDetectionDiagnosticsSnapshot
@@ -168,6 +169,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
+    val whatsAppAutoSendController = remember(context) { WhatsAppAutoSendController(appContext) }
 
     var tab by remember { mutableStateOf(AccessibilityTab.HOME) }
     var modal by remember {
@@ -287,24 +289,27 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 } else {
                 when (modal) {
                     AccessibilityModal.NONE -> when (tab) {
-                        AccessibilityTab.HOME -> HomeScreen(
+                        AccessibilityTab.HOME -> {
+                        val homeStatusInput = HomeServiceStatusInput(
+                            bridgeEnabled = bridgingEnabled,
+                            whatsappMode = if (askBeforeSend) {
+                                MissedCallWhatsAppMode.PREPARED_MANUAL
+                            } else {
+                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
+                            },
+                            primaryChannel = settings.primaryChannel,
+                            whatsappAvailable = whatsappAvailability.selectedPackage != null,
+                            smsFallbackEnabled = smsFallback,
+                            readPhoneStateGranted = phoneStateGranted,
+                            readCallLogGranted = callLogGranted,
+                            detectorEnabled = callDetectionPreferences.isEnabled(),
+                            autoSendConsentGranted = whatsAppAutoSendController.isAccessibilityServiceEnabled(),
+                            hasTemplate = templates.isNotEmpty()
+                        )
+                        HomeScreen(
                             bridgingEnabled = bridgingEnabled,
-                            statusRows = HomeServiceStatus.rows(
-                                HomeServiceStatusInput(
-                                    bridgeEnabled = bridgingEnabled,
-                                    whatsappMode = if (askBeforeSend) {
-                                        MissedCallWhatsAppMode.PREPARED_MANUAL
-                                    } else {
-                                        MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
-                                    },
-                                    primaryChannel = settings.primaryChannel,
-                                    whatsappAvailable = whatsappAvailability.selectedPackage != null,
-                                    smsFallbackEnabled = smsFallback,
-                                    readPhoneStateGranted = phoneStateGranted,
-                                    readCallLogGranted = callLogGranted,
-                                    detectorEnabled = callDetectionPreferences.isEnabled()
-                                )
-                            ),
+                            statusLine = HomeServiceStatus.statusLine(homeStatusInput),
+                            statusRows = HomeServiceStatus.rows(homeStatusInput),
                             bridgeReady = bridgingEnabled &&
                                 phoneStateGranted &&
                                 callLogGranted &&
@@ -332,6 +337,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 }
                             }
                         )
+                        }
                         AccessibilityTab.ACTIVITY -> ActivityScreen(logStore = logStore)
                         AccessibilityTab.SETTINGS -> {
                         val allowedPreview = remember(recipientsRefresh) {
@@ -493,6 +499,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         selectedEndedId = selectedEndedId,
                         selectedMissedId = selectedMissedId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
+                        primaryChannel = settings.primaryChannel,
+                        whatsappAvailable = whatsappAvailability.selectedPackage != null,
                         askBeforeSend = askBeforeSend,
                         onOpenContactCardSettings = { modal = AccessibilityModal.CONTACT_CARD },
                         onDone = { modal = AccessibilityModal.NONE }
@@ -551,6 +559,7 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, onClick
 @Composable
 private fun HomeScreen(
     bridgingEnabled: Boolean,
+    statusLine: HomeServiceStatusLine,
     statusRows: List<HomeServiceStatusRow>,
     bridgeReady: Boolean,
     templates: List<MessageTemplate>,
@@ -623,11 +632,13 @@ private fun HomeScreen(
                     color = AccessibilityColors.Heading,
                     modifier = Modifier.fillMaxWidth()
                 )
+                // The single ranked status line (plan §1/§9) — the most important text in the
+                // product. Its tone drives the color; the row detail below is secondary.
                 Text(
-                    text = "אם לא אענה לשיחה, האפליקציה תבקש מהמתקשר לכתוב לי.",
+                    text = statusLine.label,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
-                    color = AccessibilityColors.TextStrong,
+                    color = homeServiceStatusLineColor(statusLine.tone),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -922,6 +933,15 @@ private fun homeServiceStatusTrailingTint(tone: HomeServiceStatusTone): Color =
         HomeServiceStatusTone.ACTIVE -> AccessibilityColors.GreenBright
         HomeServiceStatusTone.NEUTRAL -> AccessibilityColors.Primary
         HomeServiceStatusTone.DISABLED -> AccessibilityColors.UnselectedIcon
+    }
+
+// The single status line's color: green when healthy, amber when a blocking problem
+// needs the user's attention (plan §1 — one clear state, ranked by severity).
+private fun homeServiceStatusLineColor(tone: HomeServiceStatusTone): Color =
+    when (tone) {
+        HomeServiceStatusTone.ACTIVE -> AccessibilityColors.GreenBright
+        HomeServiceStatusTone.NEUTRAL -> AccessibilityColors.TextStrong
+        HomeServiceStatusTone.DISABLED -> AccessibilityColors.Warning
     }
 
 // ===================== SCREEN 2 — SETUP / CONSENT =====================
@@ -1262,6 +1282,8 @@ private fun MissedCallPromptScreen(
     selectedEndedId: String,
     selectedMissedId: String,
     preferredWhatsAppPackage: String,
+    primaryChannel: MissedCallResponsePrimaryChannel,
+    whatsappAvailable: Boolean,
     askBeforeSend: Boolean,
     onOpenContactCardSettings: () -> Unit,
     onDone: () -> Unit
@@ -1298,6 +1320,57 @@ private fun MissedCallPromptScreen(
     val normalizedPhone = remember(phone) { PhoneNumberNormalizer.normalizeForWhatsApp(phone) }
     var status by remember { mutableStateOf<String?>(null) }
 
+    // The primary button + header channel are one and the same (plan §1): resolve once, use
+    // the same name in both. The card add-on is a completed-call action only (§4 / §3ה) — the
+    // missed-call screen never shows it. In a completed call the message field is the main
+    // action, so it opens for editing immediately (§3ד).
+    val channelResolution = remember(primaryChannel, whatsappAvailable) {
+        FollowUpChannelResolver.resolve(primaryChannel, whatsappAvailable)
+    }
+    val isMissed = mode == FollowUpPromptMode.MISSED_CALL
+    val showContactCard = !isMissed
+    val missingNumber = isMissed && normalizedPhone == null
+    // "אפשרויות נוספות" offers the other channel for this one send.
+    var showMoreOptions by remember { mutableStateOf(false) }
+
+    fun openWhatsApp() {
+        if (normalizedPhone == null || resolvedMessage.isBlank()) {
+            status = "חסר מספר תקין או נוסח הודעה."
+            return
+        }
+        val result = AccessibilityActions.openWhatsApp(
+            context,
+            WhatsAppLinkBuilder.build(normalizedPhone, resolvedMessage),
+            preferredWhatsAppPackage
+        )
+        if (result == null) {
+            AccessibilityActions.logEntry(context, com.followupnadlan.followuplog.FollowUpActionType.WHATSAPP_OPENED, resolvedMessage, phone)
+            onDone()
+        } else {
+            status = result
+        }
+    }
+
+    fun openSms() {
+        if (phone.isBlank() || resolvedMessage.isBlank()) {
+            status = "חסר מספר או נוסח הודעה."
+            return
+        }
+        val result = AccessibilityActions.openSmsComposer(context, phone, resolvedMessage)
+        if (result == null) {
+            onDone()
+        } else {
+            status = result
+        }
+    }
+
+    fun runPrimary() {
+        when (channelResolution.channel) {
+            FollowUpSendChannel.WHATSAPP -> openWhatsApp()
+            FollowUpSendChannel.SMS -> openSms()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1315,15 +1388,51 @@ private fun MissedCallPromptScreen(
         )
         Spacer(modifier = Modifier.height(18.dp))
         Text(FollowUpPromptModeLogic.title(mode), fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = AccessibilityColors.Heading)
-        Spacer(modifier = Modifier.height(8.dp))
+
+        // "רואים למי + באיזה ערוץ" (plan §1) — the recipient and the channel are the first
+        // thing on the screen, and the channel name here is identical to the primary button.
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("אל:", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = AccessibilityColors.TextMuted)
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = phone.ifBlank { "מספר לא ידוע" },
             fontWeight = FontWeight.Bold,
             fontSize = 24.sp,
             color = AccessibilityColors.TextStrong
         )
-        Spacer(modifier = Modifier.height(14.dp))
-        Text("לשלוח הודעה?", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = AccessibilityColors.TextBody)
+        if (!missingNumber) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(
+                    imageVector = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityIcons.Chat else AccessibilityIcons.Sms,
+                    contentDescription = null,
+                    tint = AccessibilityColors.Primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = channelResolution.channelName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = AccessibilityColors.Primary
+                )
+            }
+        }
+
+        if (missingNumber) {
+            // Missed call with no usable number → nothing can be sent; offer only to close (§4).
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "מספר לא ידוע — אי אפשר לשלוח",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = AccessibilityColors.Danger,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinePillButton(text = "ביטול", onClick = onDone)
+            return@Column
+        }
 
         if (showSelector) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -1335,17 +1444,31 @@ private fun MissedCallPromptScreen(
             )
         }
 
-        // Message bubble + quick in-place edit — always available, in both modes.
         Spacer(modifier = Modifier.height(16.dp))
-        WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinePillButton(
-            text = "ערוך הודעה",
-            onClick = { editing = true },
-            borderColor = AccessibilityColors.Primary,
-            contentColor = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.Edit
-        )
+        if (isMissed) {
+            // Missed call: the user wasn't in a conversation, so a generic message is enough —
+            // the bubble shows it and editing stays a secondary action (§3ד distinction).
+            WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinePillButton(
+                text = "ערוך הודעה",
+                onClick = { editing = true },
+                borderColor = AccessibilityColors.Primary,
+                contentColor = AccessibilityColors.Primary,
+                leadingIcon = AccessibilityIcons.Edit
+            )
+        } else {
+            // Completed call: the user just spoke and has context, so editing is the main action —
+            // the field is open for immediate editing, not hidden behind a button (§3ד).
+            OutlinedTextField(
+                value = resolvedMessage,
+                onValueChange = { localEdit = it },
+                label = { Text("ההודעה שתישלח") },
+                minLines = 4,
+                maxLines = 10,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = "עריכה זו מתאימה את ההודעה לשיחה הזו בלבד ואינה נשמרת כברירת מחדל.",
@@ -1357,92 +1480,80 @@ private fun MissedCallPromptScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // One primary button matching the chosen channel (plan §1) — its label is identical to
+        // the channel name shown in the header above.
         PillButton(
-            text = "פתח WhatsApp",
-            onClick = {
-                if (normalizedPhone == null || resolvedMessage.isBlank()) {
-                    status = "חסר מספר תקין או נוסח הודעה."
-                    return@PillButton
-                }
-                val result = AccessibilityActions.openWhatsApp(
-                    context,
-                    WhatsAppLinkBuilder.build(normalizedPhone, resolvedMessage),
-                    preferredWhatsAppPackage
-                )
-                if (result == null) {
-                    AccessibilityActions.logEntry(context, com.followupnadlan.followuplog.FollowUpActionType.WHATSAPP_OPENED, resolvedMessage, phone)
-                    onDone()
-                } else {
-                    status = result
-                }
-            },
-            background = AccessibilityColors.Green,
-            leadingIcon = AccessibilityIcons.Chat
+            text = channelResolution.primaryButtonText,
+            onClick = { runPrimary() },
+            background = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityColors.Green else AccessibilityColors.Primary,
+            leadingIcon = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityIcons.Chat else AccessibilityIcons.Sms
         )
 
-        // Share the business owner's own contact card (vCard). Always visible so the feature is
-        // discoverable; disabled with a CTA when the card details haven't been filled in yet.
+        // "אפשרויות נוספות" — the other channel for this one send only.
         Spacer(modifier = Modifier.height(11.dp))
-        PillButton(
-            text = "שלח כרטיס איש קשר",
-            enabled = contactCardComplete,
-            onClick = {
-                when (val result = shareContactCard(preferredWhatsAppPackage)) {
-                    is ContactCardShareResult.Opened -> status = null
-                    ContactCardShareResult.IncompleteProfile -> onOpenContactCardSettings()
-                    is ContactCardShareResult.Failed -> status = result.userMessage
-                }
-            },
-            background = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.PersonAdd
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        if (contactCardComplete) {
-            Text(
-                text = "ייפתח WhatsApp עם הכרטיס מצורף — בחר/י את השיחה ולחץ/י שלח.",
-                fontSize = 12.sp,
-                color = AccessibilityColors.TextMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
+        if (!showMoreOptions) {
+            OutlinePillButton(
+                text = "אפשרויות נוספות",
+                onClick = { showMoreOptions = true },
+                borderColor = AccessibilityColors.Primary,
+                contentColor = AccessibilityColors.Primary
             )
         } else {
-            Text(
-                text = "כדי להפעיל, מלא/י שם וטלפון בכרטיס איש הקשר.",
-                fontSize = 12.sp,
-                color = AccessibilityColors.TextMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinePillButton(
-                text = "מילוי פרטי הכרטיס",
-                onClick = onOpenContactCardSettings,
-                borderColor = AccessibilityColors.Primary,
-                contentColor = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.PersonAdd
+            val otherIsWhatsApp = channelResolution.channel == FollowUpSendChannel.SMS
+            PillButton(
+                text = if (otherIsWhatsApp) "פתח ${FollowUpChannelResolver.WHATSAPP_NAME}" else "פתח ${FollowUpChannelResolver.SMS_NAME}",
+                onClick = { if (otherIsWhatsApp) openWhatsApp() else openSms() },
+                background = AccessibilityColors.Primary,
+                leadingIcon = if (otherIsWhatsApp) AccessibilityIcons.Chat else AccessibilityIcons.Sms
             )
         }
 
+        // Contact-card share — completed-call flow only (§4 / §3ה): a separate clean vCard share.
+        if (showContactCard) {
+            Spacer(modifier = Modifier.height(11.dp))
+            PillButton(
+                text = "צרף את הכרטיס שלי",
+                enabled = contactCardComplete,
+                onClick = {
+                    when (val result = shareContactCard(preferredWhatsAppPackage)) {
+                        is ContactCardShareResult.Opened -> status = null
+                        ContactCardShareResult.IncompleteProfile -> onOpenContactCardSettings()
+                        is ContactCardShareResult.Failed -> status = result.userMessage
+                    }
+                },
+                background = AccessibilityColors.Primary,
+                leadingIcon = AccessibilityIcons.PersonAdd
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            if (contactCardComplete) {
+                Text(
+                    text = "ייפתח WhatsApp עם הכרטיס — בחר/י את השיחה ולחץ/י שלח.",
+                    fontSize = 12.sp,
+                    color = AccessibilityColors.TextMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Text(
+                    text = "מלא/י שם וטלפון בהפרטים שלי כדי לצרף כרטיס.",
+                    fontSize = 12.sp,
+                    color = AccessibilityColors.TextMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinePillButton(
+                    text = "מילוי פרטי הכרטיס",
+                    onClick = onOpenContactCardSettings,
+                    borderColor = AccessibilityColors.Primary,
+                    contentColor = AccessibilityColors.Primary,
+                    leadingIcon = AccessibilityIcons.PersonAdd
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(11.dp))
-        PillButton(
-            text = "פתח SMS",
-            onClick = {
-                if (phone.isBlank() || resolvedMessage.isBlank()) {
-                    status = "חסר מספר או נוסח הודעה."
-                    return@PillButton
-                }
-                val result = AccessibilityActions.openSmsComposer(context, phone, resolvedMessage)
-                if (result == null) {
-                    onDone()
-                } else {
-                    status = result
-                }
-            },
-            background = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.Sms
-        )
-        Spacer(modifier = Modifier.height(11.dp))
-        OutlinePillButton(text = "ביטול", onClick = onDone)
+        OutlinePillButton(text = if (isMissed) "ביטול" else "לא הפעם", onClick = onDone)
         status?.let {
             Spacer(modifier = Modifier.height(10.dp))
             Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp)
