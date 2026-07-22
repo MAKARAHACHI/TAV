@@ -65,7 +65,7 @@ object AllowedRecipientMatcher {
 }
 
 object AllowedRecipientsUiSpec {
-    const val TITLE = "רק למי לשלוח?"
+    const val TITLE = "רק למי שבחרתי"
     const val DESCRIPTION = "בחר/י מספרים שהאפליקציה כן תשלח להם הודעה אוטומטית."
     const val EMPTY_STATE = "עדיין לא בחרת מספרים. במצב הזה לא תישלח הודעה אוטומטית לאף אחד."
     const val ITEM_SUBTITLE = "תישלח הודעה אוטומטית אם לא תענה/י"

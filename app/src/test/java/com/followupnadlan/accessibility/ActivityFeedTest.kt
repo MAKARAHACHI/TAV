@@ -86,7 +86,7 @@ class ActivityFeedTest {
     @Test
     fun duplicateShowsFriendlyDuplicateRow() {
         val rows = ActivityFeed.rows(listOf(entry(FollowUpActionType.AUTO_SMS_SKIPPED_DUPLICATE)), utc)
-        assertEquals("לא נשלח בגלל הגנת כפילויות", rows.first().title)
+        assertEquals("לא נשלח — נשלחה כבר הודעה למספר הזה לאחרונה", rows.first().title)
     }
 
     @Test

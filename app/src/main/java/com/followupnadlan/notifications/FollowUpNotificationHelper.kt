@@ -100,9 +100,9 @@ class FollowUpNotificationHelper(private val context: Context) {
 
         const val CHANNEL_ID = "follow_up_cards"
         private const val CHANNEL_NAME = "כרטיסי פולואפ"
-        private const val CHANNEL_DESCRIPTION = "התראות לפתיחת כרטיס שליחה מהיר לוואטסאפ"
+        private const val CHANNEL_DESCRIPTION = "התראות לפתיחת כרטיס שליחה מהיר ל־WhatsApp"
         private const val NOTIFICATION_ID = 8001
         private const val NOTIFICATION_TITLE = "להוציא פולואפ?"
-        private const val NOTIFICATION_BODY = "פתח כרטיס שליחה מהיר לוואטסאפ"
+        private const val NOTIFICATION_BODY = "פתח כרטיס שליחה מהיר ל־WhatsApp"
     }
 }

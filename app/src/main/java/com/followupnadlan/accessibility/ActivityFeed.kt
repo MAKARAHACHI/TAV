@@ -76,7 +76,7 @@ object ActivityFeed {
             Triple(AccessibilityIcons.Schedule, AccessibilityColors.Warning, "ממתין לאישור שלך")
 
         FollowUpActionType.MANUAL_REPLY_CANCELLED ->
-            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "המשתמש ביטל")
+            Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "בחרת לא לשלוח")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_EXCLUDED ->
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — בחרת לא לשלוח למספר הזה")
@@ -102,7 +102,7 @@ object ActivityFeed {
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא הצלחנו לשלוח SMS")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_DUPLICATE ->
-            Triple(AccessibilityIcons.Schedule, AccessibilityColors.Warning, "לא נשלח בגלל הגנת כפילויות")
+            Triple(AccessibilityIcons.Schedule, AccessibilityColors.Warning, "לא נשלח — נשלחה כבר הודעה למספר הזה לאחרונה")
 
         FollowUpActionType.AUTO_SMS_SKIPPED_CONTACTS_ONLY ->
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — אין הרשאת אנשי קשר כדי לוודא שהמספר שמור")

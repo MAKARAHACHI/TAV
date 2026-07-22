@@ -272,7 +272,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 undoScope.launch {
                                     val result = snackbarHostState.showSnackbar(
                                         message = message,
-                                        actionLabel = "בטל",
+                                        actionLabel = "ביטול",
                                         withDismissAction = true
                                     )
                                     if (result == SnackbarResult.ActionPerformed) {
@@ -1246,7 +1246,7 @@ private fun TemplateCardEditor(
                     },
                     modifier = Modifier.weight(1f)
                 )
-                OutlinePillButton(text = "בטל", onClick = onCancel, modifier = Modifier.weight(1f))
+                OutlinePillButton(text = "ביטול", onClick = onCancel, modifier = Modifier.weight(1f))
             }
         }
     }
@@ -1358,7 +1358,7 @@ private fun MissedCallPromptScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         PillButton(
-            text = "שלח ב־WhatsApp",
+            text = "פתח WhatsApp",
             onClick = {
                 if (normalizedPhone == null || resolvedMessage.isBlank()) {
                     status = "חסר מספר תקין או נוסח הודעה."
@@ -1425,7 +1425,7 @@ private fun MissedCallPromptScreen(
 
         Spacer(modifier = Modifier.height(11.dp))
         PillButton(
-            text = "שלח ב־SMS",
+            text = "פתח SMS",
             onClick = {
                 if (phone.isBlank() || resolvedMessage.isBlank()) {
                     status = "חסר מספר או נוסח הודעה."
@@ -1442,7 +1442,7 @@ private fun MissedCallPromptScreen(
             leadingIcon = AccessibilityIcons.Sms
         )
         Spacer(modifier = Modifier.height(11.dp))
-        OutlinePillButton(text = "בטל", onClick = onDone)
+        OutlinePillButton(text = "ביטול", onClick = onDone)
         status?.let {
             Spacer(modifier = Modifier.height(10.dp))
             Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp)
