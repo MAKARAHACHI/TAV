@@ -203,7 +203,7 @@ class CallDetectionService : Service() {
         private const val STATUS_CHANNEL_NAME = "זיהוי שיחות"
         private const val STATUS_CHANNEL_DESCRIPTION = "סטטוס לזיהוי שיחות שלא נענו"
         private const val STATUS_TITLE = "אני זמין/ה בכתב פעיל"
-        private const val STATUS_BODY = "זיהוי שיחות שלא נענו פעיל ברקע."
+        private const val STATUS_BODY = "עונה בכתב לשיחות שלא נענו"
 
         fun start(context: Context) {
             val intent = Intent(context, CallDetectionService::class.java)

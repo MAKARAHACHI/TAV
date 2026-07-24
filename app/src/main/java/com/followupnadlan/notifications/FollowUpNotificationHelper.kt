@@ -21,11 +21,16 @@ class FollowUpNotificationHelper(private val context: Context) {
     ) {
         createChannel()
 
+        // Plan §5 (call ended): honest, recipient-first. Just offers to open the follow-up screen —
+        // it names *who*, not a channel or a false "פולואפ ל־WhatsApp" promise (the channel is chosen
+        // on the screen). Body: "<name / number> — הודעה מוכנה".
+        val recipient = leadName.ifBlank { phone }.trim()
+        val body = if (recipient.isBlank()) NOTIFICATION_BODY else "$recipient — הודעה מוכנה"
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(NOTIFICATION_TITLE)
-            .setContentText(NOTIFICATION_BODY)
-            .setStyle(Notification.BigTextStyle().bigText(NOTIFICATION_BODY))
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(
                 createContentIntent(
                     phone = phone,
@@ -99,10 +104,10 @@ class FollowUpNotificationHelper(private val context: Context) {
         const val MANUAL_ACTION_CANCEL = "cancel"
 
         const val CHANNEL_ID = "follow_up_cards"
-        private const val CHANNEL_NAME = "כרטיסי פולואפ"
-        private const val CHANNEL_DESCRIPTION = "התראות לפתיחת כרטיס שליחה מהיר ל־WhatsApp"
+        private const val CHANNEL_NAME = "הודעת המשך אחרי שיחה"
+        private const val CHANNEL_DESCRIPTION = "התראות לפתיחת מסך הודעת המשך אחרי שיחה"
         private const val NOTIFICATION_ID = 8001
-        private const val NOTIFICATION_TITLE = "להוציא פולואפ?"
-        private const val NOTIFICATION_BODY = "פתח כרטיס שליחה מהיר ל־WhatsApp"
+        private const val NOTIFICATION_TITLE = "לשלוח הודעת המשך?"
+        private const val NOTIFICATION_BODY = "הודעה מוכנה — נותר לבדוק ולשלוח"
     }
 }

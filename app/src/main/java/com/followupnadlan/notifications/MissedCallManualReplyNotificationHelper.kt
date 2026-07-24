@@ -21,16 +21,19 @@ class MissedCallManualReplyNotificationHelper(private val context: Context) {
         if (phone.isBlank() || message.isBlank()) return
         createChannel()
 
+        // Plan §5: one honest action. The two former "פתח WhatsApp"/"פתח SMS" buttons fired the
+        // *same* promptIntent — both only opened the review screen, neither sent, and neither chose a
+        // channel. That is the belief-vs-reality gap §2 forbids. Collapse to a single "לבדיקה ושליחה"
+        // that opens the screen (where the real channel choice + send live), plus "לא הפעם".
         val promptIntent = createPromptIntent(phone, message, REQUEST_CODE_PROMPT)
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("ממתין לאישור שלך")
-            .setContentText("פתח WhatsApp / פתח SMS / ביטול")
-            .setStyle(Notification.BigTextStyle().bigText("זוהתה שיחה שלא נענתה. אפשר לפתוח הודעה מוכנה ב־WhatsApp, לפתוח SMS ידני או לבטל. שום דבר לא נשלח בלי אישור שלך."))
+            .setContentTitle("שיחה שלא נענתה")
+            .setContentText("הכנתי הודעה — ממתינה לאישורך. שום דבר לא נשלח.")
+            .setStyle(Notification.BigTextStyle().bigText("הכנתי הודעה — ממתינה לאישורך. שום דבר לא נשלח בלי אישור שלך."))
             .setContentIntent(promptIntent)
-            .addAction(0, "פתח WhatsApp", promptIntent)
-            .addAction(0, "פתח SMS", promptIntent)
-            .addAction(0, "ביטול", createPromptIntent(phone, message, REQUEST_CODE_CANCEL, MANUAL_ACTION_CANCEL))
+            .addAction(0, "לבדיקה ושליחה", promptIntent)
+            .addAction(0, "לא הפעם", createPromptIntent(phone, message, REQUEST_CODE_CANCEL, MANUAL_ACTION_CANCEL))
             .setAutoCancel(true)
             .build()
 
@@ -41,12 +44,17 @@ class MissedCallManualReplyNotificationHelper(private val context: Context) {
         if (phone.isBlank() || message.isBlank()) return
         createChannel()
 
+        // Plan §5 (WhatsApp unavailable, SMS-backup off): honest — the message was NOT sent, and the
+        // only manual path is opening the SMS composer (user taps send there). "פתח SMS" opens the
+        // composer (logs FALLBACK_SMS_OPENED); "ביטול" just dismisses.
+        val smsIntent = createSmsIntent(phone, message)
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("תגובה ידנית לשיחה שלא נענתה")
-            .setContentText("אפשר לפתוח הודעת SMS מוכנה לשליחה ידנית.")
-            .setStyle(Notification.BigTextStyle().bigText("אפשר לפתוח הודעת SMS מוכנה לשליחה ידנית. השליחה תתבצע רק אחרי אישור שלך."))
-            .setContentIntent(createSmsIntent(phone, message))
+            .setContentTitle("ההודעה לא נשלחה")
+            .setContentText("WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית.")
+            .setStyle(Notification.BigTextStyle().bigText("WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית — ההודעה תישלח רק אחרי שתלחצ/י שלח."))
+            .setContentIntent(smsIntent)
+            .addAction(0, "פתח SMS", smsIntent)
             .setAutoCancel(true)
             .build()
 
