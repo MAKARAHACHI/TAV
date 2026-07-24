@@ -74,6 +74,7 @@ import com.followupnadlan.postcall.CallDetectionService
 import com.followupnadlan.postcall.CallDetectionServiceAction
 import com.followupnadlan.postcall.CallDetectionServiceLifecycle
 import com.followupnadlan.profile.ContactCard
+import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.sharing.ContactCardShareResult
 import com.followupnadlan.sharing.PrepareAndShareContactCard
@@ -389,6 +390,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onOpenTemplates = { modal = AccessibilityModal.TEMPLATES },
                             onOpenContactCard = { modal = AccessibilityModal.CONTACT_CARD },
                             onDeleteHistory = { logStore.clear() },
+                            myDetailsStore = myDetailsStore,
                             diagnosticsSnapshot = diagnosticsSnapshot
                         )
                         }
@@ -1765,6 +1767,7 @@ private fun SettingsScreen(
     onOpenTemplates: () -> Unit,
     onOpenContactCard: () -> Unit,
     onDeleteHistory: () -> Unit,
+    myDetailsStore: MyDetailsStore,
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot
 ) {
     var deleted by remember { mutableStateOf(false) }
@@ -1806,23 +1809,9 @@ private fun SettingsScreen(
     ) {
         ScreenHeader(title = "הגדרות", trailingIcon = AccessibilityIcons.Settings, modifier = Modifier.padding(horizontal = 4.dp))
 
-        AppCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                SettingsSectionTitle("בדיקת זיהוי שיחות", bottomPadding = 4)
-                DiagnosticRow(
-                    "אירוע אחרון",
-                    CallDetectionDiagnosticsLabels
-                        .event(diagnosticsSnapshot.lastPhoneStateEvent.ifBlank { diagnosticsSnapshot.lastEvent })
-                        .ifBlank { "אין עדיין" }
-                )
-                DiagnosticRow("מספר אחרון", diagnosticsSnapshot.lastIncomingNumber.ifBlank { "לא זוהה" })
-                DiagnosticRow("שיחה שלא נענתה", diagnosticsSnapshot.lastMissedCallDetectedAtMillis.takeIf { it > 0L }?.toString() ?: "אין עדיין")
-                DiagnosticRow("מקלט", if (diagnosticsSnapshot.receiverActive) "פעיל" else "לא נרשם")
-                DiagnosticRow("שירות רקע", if (diagnosticsSnapshot.serviceActive) "פעיל" else "כבוי")
-                DiagnosticRow("הרשאת מצב טלפון", if (diagnosticsSnapshot.readPhoneStateGranted) "מאושר" else "חסר")
-                DiagnosticRow("הרשאת יומן שיחות", if (diagnosticsSnapshot.readCallLogGranted) "מאושר" else "חסר")
-            }
-        }
+        // §4/§6: "הפרטים שלי" — first card, inline edit-in-place (replaces the diagnostics card,
+        // which moves to "עזרה ותמיכה" at the bottom). Single source of truth: MyDetailsStore.
+        MyDetailsInlineCard(store = myDetailsStore)
 
         // איך לשלוח?
         AppCard(modifier = Modifier.fillMaxWidth()) {
@@ -1958,6 +1947,151 @@ private fun SettingsScreen(
         if (deleted) {
             Text("ההיסטוריה נמחקה.", color = AccessibilityColors.Primary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp))
         }
+
+        // §4/§6: diagnostics is the ONLY place technical data lives — moved from the top of the
+        // page down to "עזרה ותמיכה". Same rows, verbatim; nothing deleted.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                SettingsSectionTitle("עזרה ותמיכה", bottomPadding = 4)
+                DiagnosticRow(
+                    "אירוע אחרון",
+                    CallDetectionDiagnosticsLabels
+                        .event(diagnosticsSnapshot.lastPhoneStateEvent.ifBlank { diagnosticsSnapshot.lastEvent })
+                        .ifBlank { "אין עדיין" }
+                )
+                DiagnosticRow("מספר אחרון", diagnosticsSnapshot.lastIncomingNumber.ifBlank { "לא זוהה" })
+                DiagnosticRow("שיחה שלא נענתה", diagnosticsSnapshot.lastMissedCallDetectedAtMillis.takeIf { it > 0L }?.toString() ?: "אין עדיין")
+                DiagnosticRow("מקלט", if (diagnosticsSnapshot.receiverActive) "פעיל" else "לא נרשם")
+                DiagnosticRow("שירות רקע", if (diagnosticsSnapshot.serviceActive) "פעיל" else "כבוי")
+                DiagnosticRow("הרשאת מצב טלפון", if (diagnosticsSnapshot.readPhoneStateGranted) "מאושר" else "חסר")
+                DiagnosticRow("הרשאת יומן שיחות", if (diagnosticsSnapshot.readCallLogGranted) "מאושר" else "חסר")
+            }
+        }
+    }
+}
+
+// ===================== SETTINGS — MY DETAILS (inline edit) =====================
+/**
+ * §4/§6: "הפרטים שלי" at the top of Settings. Shows name / office / phone as plain values; tapping
+ * any row opens edit-in-place (no navigation to another screen). Single source of truth is
+ * [MyDetailsStore] — no separate store. Undo (§6): after a save, the previous profile is offered
+ * back for one action ("בטל שינוי").
+ */
+@Composable
+private fun MyDetailsInlineCard(store: MyDetailsStore) {
+    var profile by remember { mutableStateOf(store.load()) }
+    var editing by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(profile.agentName) }
+    var org by remember { mutableStateOf(profile.officeName) }
+    var phone by remember { mutableStateOf(profile.phone) }
+    // Undo target: the profile as it was before the last save (null = nothing to undo).
+    var undoProfile by remember { mutableStateOf<MyDetailsProfile?>(null) }
+
+    val isEmpty = profile.agentName.isBlank() && profile.officeName.isBlank() && profile.phone.isBlank()
+
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SettingsSectionTitle("הפרטים שלי", bottomPadding = 4)
+
+            if (editing) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("שם מלא") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("טלפון") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = org,
+                    onValueChange = { org = it },
+                    label = { Text("שם משרד (לא חובה)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillButton(
+                        text = "שמור",
+                        onClick = {
+                            undoProfile = profile
+                            val saved = profile.copy(
+                                agentName = name.trim(),
+                                officeName = org.trim(),
+                                phone = phone.trim()
+                            )
+                            store.save(saved)
+                            profile = saved
+                            name = saved.agentName; org = saved.officeName; phone = saved.phone
+                            editing = false
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinePillButton(
+                        text = "ביטול",
+                        onClick = {
+                            name = profile.agentName; org = profile.officeName; phone = profile.phone
+                            editing = false
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            } else if (isEmpty) {
+                Text("עדיין לא מילאת פרטים", fontSize = 14.sp, color = AccessibilityColors.TextMuted)
+                NavigationRow(
+                    label = "מלא עכשיו",
+                    onClick = {
+                        name = profile.agentName; org = profile.officeName; phone = profile.phone
+                        editing = true
+                    },
+                    topDivider = false
+                )
+            } else {
+                MyDetailRow("שם", profile.agentName.ifBlank { "—" }) { editing = true }
+                MyDetailRow("טלפון", profile.phone.ifBlank { "—" }) { editing = true }
+                MyDetailRow("משרד", profile.officeName.ifBlank { "—" }) { editing = true }
+            }
+
+            // Undo (§6): available for one action right after a save, unless we're mid-edit again.
+            if (!editing) {
+                undoProfile?.let { previous ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            store.save(previous)
+                            profile = previous
+                            name = previous.agentName; org = previous.officeName; phone = previous.phone
+                            undoProfile = null
+                        },
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(AccessibilityIcons.Block, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(18.dp))
+                        Text("בטל שינוי", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = AccessibilityColors.Primary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One read-only "label: value" row in "הפרטים שלי"; the whole row is tappable to edit in place. */
+@Composable
+private fun MyDetailRow(label: String, value: String, onEdit: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 13.sp, color = AccessibilityColors.TextMuted, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextStrong, textAlign = TextAlign.End, modifier = Modifier.weight(1.4f))
+        Icon(AccessibilityIcons.Edit, contentDescription = "ערוך", tint = AccessibilityColors.Primary, modifier = Modifier.size(18.dp).padding(start = 6.dp))
     }
 }
 
