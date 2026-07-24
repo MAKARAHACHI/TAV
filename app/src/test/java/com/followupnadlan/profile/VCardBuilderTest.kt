@@ -17,12 +17,28 @@ class VCardBuilderTest {
         assertEquals(
             "BEGIN:VCARD\r\n" +
                 "VERSION:3.0\r\n" +
+                "N:דניאל כהן;;;;\r\n" +
                 "FN:דניאל כהן\r\n" +
                 "ORG:נדל\"ן\r\n" +
                 "TEL;TYPE=CELL:0501234567\r\n" +
                 "END:VCARD\r\n",
             vcard
         )
+    }
+
+    @Test
+    fun emitsNFieldWithFullNameInFamilyPositionRightAfterVersion() {
+        val vcard = VCardBuilder.build(card())!!
+        // N: present, full name in the family position, given/middle/prefix/suffix empty.
+        assertTrue(vcard.contains("N:דניאל כהן;;;;\r\n"))
+        // N: sits immediately after VERSION (required for WhatsApp add-to-contacts).
+        assertTrue(vcard.contains("VERSION:3.0\r\nN:דניאל כהן;;;;\r\n"))
+    }
+
+    @Test
+    fun escapesSpecialCharsInNFieldSoItCannotInjectAProperty() {
+        val vcard = VCardBuilder.build(card(fullName = "a;b,c\\d"))!!
+        assertTrue(vcard.contains("N:a\\;b\\,c\\\\d;;;;\r\n"))
     }
 
     @Test
@@ -76,8 +92,8 @@ class VCardBuilderTest {
         // A newline in the name must NOT create a new physical vCard line.
         val vcard = VCardBuilder.build(card(fullName = "Evil\nTEL;TYPE=CELL:666"))!!
         assertTrue(vcard.contains("FN:Evil\\nTEL\\;TYPE=CELL:666\r\n"))
-        // Exactly the six structural lines — no injected one.
-        assertEquals(6, vcard.split("\r\n").filter { it.isNotEmpty() }.size)
+        // Exactly the seven structural lines (BEGIN, VERSION, N, FN, ORG, TEL, END) — no injected one.
+        assertEquals(7, vcard.split("\r\n").filter { it.isNotEmpty() }.size)
     }
 
     @Test

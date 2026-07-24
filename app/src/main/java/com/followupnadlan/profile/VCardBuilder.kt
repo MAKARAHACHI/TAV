@@ -6,7 +6,12 @@ package com.followupnadlan.profile
  * Every value is escaped before assembly to prevent property injection — a newline inside a name
  * must never open a new vCard line. Lines are CRLF-separated and the output ends with
  * `END:VCARD\r\n`, per RFC 2426. The phone is emitted raw (no E.164 normalization); `ORG` is
- * omitted entirely when blank; there is no `N:` (no reliable given/family split from one field).
+ * omitted entirely when blank.
+ *
+ * `N:` carries the full name in the family-name position only (`N:<name>;;;;`). We have a single
+ * name field, so no given/family split is invented. WhatsApp requires a present `N:` to offer
+ * "add to contacts" instead of the business-view fallback (proven by the Stage 0 POC); an
+ * `FN`-only card is treated as a business and cannot be added.
  */
 object VCardBuilder {
     private const val CRLF = "\r\n"
@@ -17,6 +22,7 @@ object VCardBuilder {
         val lines = buildList {
             add("BEGIN:VCARD")
             add("VERSION:3.0")
+            add("N:${escape(card.fullName.trim())};;;;")
             add("FN:${escape(card.fullName.trim())}")
             if (card.org.isNotBlank()) add("ORG:${escape(card.org.trim())}")
             add("TEL;TYPE=CELL:${escape(card.phone.trim())}")

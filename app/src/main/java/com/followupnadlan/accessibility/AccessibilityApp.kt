@@ -388,7 +388,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
                             onOpenAllowedRecipients = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
                             onOpenTemplates = { modal = AccessibilityModal.TEMPLATES },
-                            onOpenContactCard = { modal = AccessibilityModal.CONTACT_CARD },
                             onDeleteHistory = { logStore.clear() },
                             myDetailsStore = myDetailsStore,
                             diagnosticsSnapshot = diagnosticsSnapshot
@@ -1765,7 +1764,6 @@ private fun SettingsScreen(
     onOpenExclusions: () -> Unit,
     onOpenAllowedRecipients: () -> Unit,
     onOpenTemplates: () -> Unit,
-    onOpenContactCard: () -> Unit,
     onDeleteHistory: () -> Unit,
     myDetailsStore: MyDetailsStore,
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot
@@ -1920,15 +1918,9 @@ private fun SettingsScreen(
             )
         }
 
-        // "My contact card" entry — the details shared as a vCard on request.
-        AppCard(modifier = Modifier.fillMaxWidth()) {
-            NavigationRowContent(
-                label = "כרטיס איש הקשר שלי",
-                leadingIcon = AccessibilityIcons.PersonAdd,
-                leadingTint = AccessibilityColors.Primary,
-                onClick = onOpenContactCard
-            )
-        }
+        // (Contact-card editing lives inline in "הפרטים שלי" at the top of Settings — no separate
+        // entry here. ContactCardScreen still exists as the IncompleteProfile fallback from the
+        // post-call share flow, reached via onOpenContactCardSettings, not from Settings.)
 
         // Delete history
         AppCard(modifier = Modifier.fillMaxWidth()) {
@@ -2057,6 +2049,13 @@ private fun MyDetailsInlineCard(store: MyDetailsStore) {
                 MyDetailRow("שם", profile.agentName.ifBlank { "—" }) { editing = true }
                 MyDetailRow("טלפון", profile.phone.ifBlank { "—" }) { editing = true }
                 MyDetailRow("משרד", profile.officeName.ifBlank { "—" }) { editing = true }
+
+                // Preview of the card as it will be shared, so editing and preview live in one place.
+                val previewCard = ContactCard(fullName = profile.agentName, org = profile.officeName, phone = profile.phone)
+                if (previewCard.isComplete) {
+                    Text("תצוגה מקדימה", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextMuted)
+                    ContactCardPreview(previewCard)
+                }
             }
 
             // Undo (§6): available for one action right after a save, unless we're mid-edit again.
@@ -2101,8 +2100,9 @@ private fun ContactCardScreen(
     store: MyDetailsStore,
     onBack: () -> Unit
 ) {
-    // Loaded once as the base; copy() preserves the other MyDetails fields on save/clear.
-    val profile = remember { store.load() }
+    // Base profile; copy() preserves the other MyDetails fields on save/clear. Mutable so a save
+    // can refresh it before we return to the caller (post-call flow).
+    var profile by remember { mutableStateOf(store.load()) }
     var fullName by remember { mutableStateOf(profile.agentName) }
     var org by remember { mutableStateOf(profile.officeName) }
     var phone by remember { mutableStateOf(profile.phone) }
@@ -2176,10 +2176,13 @@ private fun ContactCardScreen(
                     phone = phone.trim()
                 )
                 store.save(trimmed)
+                profile = trimmed
                 fullName = trimmed.agentName
                 org = trimmed.officeName
                 phone = trimmed.phone
-                savedMessage = "פרטי הכרטיס נשמרו"
+                // When we got here to complete a missing profile (post-call share), a complete
+                // save returns to the flow that sent us; otherwise just confirm in place.
+                if (ContactCard.fromProfile(trimmed).isComplete) onBack() else savedMessage = "פרטי הכרטיס נשמרו"
             }
         )
         OutlinePillButton(
