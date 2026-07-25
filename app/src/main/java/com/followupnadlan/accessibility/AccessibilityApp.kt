@@ -97,7 +97,10 @@ internal enum class AccessibilityModal {
     EXCLUSIONS,
     ALLOWED_RECIPIENTS,
     CONTACT_CARD,
-    MISSED_CALL_PROMPT
+    MISSED_CALL_PROMPT,
+    // Design Pass 2/3 — the two trust-moment journey pages, opened from the home cards.
+    MISSED_JOURNEY,
+    ENDED_JOURNEY
 }
 
 /** Candidate source for the multi-picker overlay. */
@@ -308,24 +311,14 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             hasTemplate = templates.isNotEmpty()
                         )
                         HomeScreen(
+                            agentName = myDetailsStore.load().agentName,
                             bridgingEnabled = bridgingEnabled,
-                            statusLine = HomeServiceStatus.statusLine(homeStatusInput),
-                            statusRows = HomeServiceStatus.rows(homeStatusInput),
                             bridgeReady = bridgingEnabled &&
                                 phoneStateGranted &&
                                 callLogGranted &&
                                 callDetectionPreferences.isEnabled(),
-                            templates = templates,
-                            selectedEndedId = selectedEndedId,
-                            selectedMissedId = selectedMissedId,
-                            preferredWhatsAppPackage = preferredWhatsAppPackage,
-                            logStore = logStore,
-                            onSaveTemplateBody = { templateId, body ->
-                                templates.firstOrNull { it.id == templateId }?.let { template ->
-                                    templateStore.saveTemplate(template.copy(body = body))
-                                    templates = templateStore.loadTemplates()
-                                }
-                            },
+                            onOpenMissedJourney = { modal = AccessibilityModal.MISSED_JOURNEY },
+                            onOpenEndedJourney = { modal = AccessibilityModal.ENDED_JOURNEY },
                             onToggleBridging = {
                                 if (bridgingEnabled) {
                                     settings.isEnabled = false
@@ -492,6 +485,30 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         onBack = { modal = AccessibilityModal.NONE }
                     )
 
+                    AccessibilityModal.MISSED_JOURNEY -> {
+                        val missedTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.MISSED_CALL, selectedMissedId
+                        )
+                        MissedJourneyScreen(
+                            missedMessage = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            recipientLabel = recipientScopeLabel(recipientScope),
+                            askBeforeSend = askBeforeSend,
+                            channelLabel = "WhatsApp",
+                            onBack = { modal = AccessibilityModal.NONE }
+                        )
+                    }
+
+                    AccessibilityModal.ENDED_JOURNEY -> {
+                        val endedTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.CALL_ENDED, selectedEndedId
+                        )
+                        EndedJourneyScreen(
+                            reminderMessage = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            card = ContactCard.fromProfile(myDetailsStore.load()),
+                            onBack = { modal = AccessibilityModal.NONE }
+                        )
+                    }
+
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
                         message = missedCallLaunch.message,
@@ -556,48 +573,224 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, onClick
     }
 }
 
+/**
+ * One journey row (Design Pass 2/3): a question/label on top, the current *result* below, and a
+ * trailing chevron when [onClick] is set. The value is result-language, never a mechanism name —
+ * the caller passes "לכל מי שמתקשר", not "Recipient Scope". Display-only until the wiring pass:
+ * [onClick] is null in these passes, so the chevron is shown but the row is inert.
+ */
+@Composable
+private fun JourneyResultRow(
+    title: String,
+    value: String,
+    onClick: (() -> Unit)? = null
+) {
+    val rowModifier = if (onClick != null) {
+        Modifier.clickable(onClick = onClick)
+    } else {
+        Modifier
+    }
+    AppCard(cornerRadius = 18) {
+        Row(
+            modifier = rowModifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    color = AccessibilityColors.TextMuted
+                )
+                Text(
+                    text = value,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = AccessibilityColors.TextStrong
+                )
+            }
+            if (onClick != null) {
+                Icon(
+                    AccessibilityIcons.ChevronStart,
+                    contentDescription = null,
+                    tint = AccessibilityColors.TextFaint,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
+
+/** A quiet, borderless journey line — e.g. the cooldown statement. No picker, no chevron. */
+@Composable
+private fun JourneyQuietLine(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            AccessibilityIcons.Schedule,
+            contentDescription = null,
+            tint = AccessibilityColors.TextFaint,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
+            color = AccessibilityColors.TextMuted
+        )
+    }
+}
+
+/** Section label above a journey row group ("ההודעה", "התזכורת", "כרטיס הביקור"). */
+@Composable
+private fun JourneySectionLabel(text: String) {
+    Text(
+        text = text,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 15.sp,
+        color = AccessibilityColors.Heading,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+// ===================== SCREEN 2 — "אם לא עניתי" (Design Pass 2) =====================
+// A stand-alone journey page (deep-link safe). Each row is a result that stands on its own —
+// no summary, no chips. Result-language only (Golden Rule): "מי יקבל את ההודעה?" answers with
+// "לכל מי שמתקשר", the send-confirm row asks a decision, not "how it's sent". Display-only:
+// values are read from the existing stores; the chevrons don't open pickers until the wiring pass.
+@Composable
+private fun MissedJourneyScreen(
+    missedMessage: String,
+    recipientLabel: String,
+    askBeforeSend: Boolean,
+    channelLabel: String,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ModalHeader(title = "אם לא עניתי", onBack = onBack)
+        Text(
+            text = "בפעם הבאה שלא תוכל לענות, הלקוח יקבל ממך הודעה.",
+            fontWeight = FontWeight.Medium,
+            fontSize = 15.sp,
+            lineHeight = 23.sp,
+            color = AccessibilityColors.TextBody,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 3 — the message the client receives.
+        JourneySectionLabel("ההודעה")
+        WhatsAppMessagePreview(message = missedMessage, maxLines = 8)
+        OutlinePillButton(
+            text = "שנה את ההודעה",
+            onClick = { /* wiring pass */ },
+            borderColor = AccessibilityColors.Primary,
+            contentColor = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.Edit
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // 4 — who receives it (result, not "recipient scope").
+        JourneyResultRow(title = "מי יקבל את ההודעה?", value = recipientLabel)
+        // 5 — the confirm-before-send decision, phrased as a result.
+        JourneyResultRow(
+            title = "האם לאשר לפני שליחה?",
+            value = if (askBeforeSend) "כן, אאשר כל הודעה" else "לא, תישלח גם בלי אישורי"
+        )
+        // 6 — how the client receives it (§2 — the code only knows installed/not).
+        JourneyResultRow(title = "איך הלקוח יקבל אותה?", value = channelLabel)
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // 7 — cooldown, stated quietly. No picker.
+        JourneyQuietLine("לא נשלח שוב הודעה לאותו אדם במשך שעה.")
+    }
+}
+
+// ===================== SCREEN 3 — "אחרי שדיברנו" (Design Pass 3) =====================
+// Configure only — never Act. The ended send happens in a notification 5-10s after a call, not
+// here. So this page has no "שלח", no client picker, no CTA. It only defines what will be sent:
+// the reminder wording and the business card. "הודעה" becomes "תזכורת" in the display lexicon.
+// Display-only: "שנה"/"ערוך" are inert until the wiring pass.
+@Composable
+private fun EndedJourneyScreen(
+    reminderMessage: String,
+    card: ContactCard,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ModalHeader(title = "אחרי שדיברנו", onBack = onBack)
+        Text(
+            text = "אחרי שיחה תוכל לשלוח תזכורת וכרטיס ביקור.",
+            fontWeight = FontWeight.Medium,
+            fontSize = 15.sp,
+            lineHeight = 23.sp,
+            color = AccessibilityColors.TextBody,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 3 — the reminder text ("הודעה" → "תזכורת" in the lexicon).
+        JourneySectionLabel("התזכורת")
+        WhatsAppMessagePreview(message = reminderMessage, maxLines = 8)
+        OutlinePillButton(
+            text = "שנה את התזכורת",
+            onClick = { /* wiring pass */ },
+            borderColor = AccessibilityColors.Primary,
+            contentColor = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.Edit
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // 4 — the business card that goes with the reminder.
+        JourneySectionLabel("כרטיס הביקור")
+        ContactCardPreview(card = card)
+        OutlinePillButton(
+            text = "ערוך כרטיס ביקור",
+            onClick = { /* wiring pass */ },
+            borderColor = AccessibilityColors.Primary,
+            contentColor = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.Edit
+        )
+    }
+}
+
 // ===================== SCREEN 1 — HOME =====================
+// Design Pass 1 — "גרסה C": the home no longer tells a product/status story. It carries
+// identity: the two trust moments ("אם לא עניתי" / "אחרי שדיברנו") in result-language. No badge
+// and no state label — "automatic" is a mechanism, not a result (Golden Rule), and the
+// automatic/manual distinction is learned on entering the journey, not on Home (rule 3). The old
+// status/quick-send blocks are gone; the bridging-enable line is kept as a single quiet line at
+// the bottom, because a disabled bridge the user is unaware of is a false belief that messages
+// are being sent (§2).
 @Composable
 private fun HomeScreen(
+    agentName: String,
     bridgingEnabled: Boolean,
-    statusLine: HomeServiceStatusLine,
-    statusRows: List<HomeServiceStatusRow>,
     bridgeReady: Boolean,
-    templates: List<MessageTemplate>,
-    selectedEndedId: String,
-    selectedMissedId: String,
-    preferredWhatsAppPackage: String,
-    logStore: FollowUpLogStore,
-    onSaveTemplateBody: (templateId: String, body: String) -> Unit,
+    onOpenMissedJourney: () -> Unit,
+    onOpenEndedJourney: () -> Unit,
     onToggleBridging: () -> Unit
 ) {
-    val context = LocalContext.current
-    // The home quick-send isn't tied to a specific call, so the user picks which wording to
-    // use for this manual send. Defaults to the completed-call wording.
-    var homeRole by remember { mutableStateOf(TemplateRole.CALL_ENDED) }
-    val selectedIdForRole = if (homeRole == TemplateRole.MISSED_CALL) selectedMissedId else selectedEndedId
-    val activeTemplate = TemplateRoleSelector.forRole(templates, homeRole, selectedIdForRole)
-    // Full composed message (body + card/website links) — exactly what the preview shows and
-    // what is actually sent. Using .body alone dropped the links from the sent message.
-    val selectedMessage = activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
-    var editingMessage by remember { mutableStateOf(false) }
-    var quickPhone by remember { mutableStateOf("") }
-    var quickPhoneEditing by remember { mutableStateOf(false) }
-    var lastAppliedMissedPhone by remember { mutableStateOf<String?>(null) }
-    var quickStatus by remember { mutableStateOf<String?>(null) }
-    var logEntries by remember { mutableStateOf(logStore.load()) }
-    val latestMissedCaller = remember(logEntries) { LastMissedCallerLogic.from(logEntries) }
-
-    LaunchedEffect(latestMissedCaller?.phone, quickPhoneEditing) {
-        val next = HomeQuickWhatsAppNumberLogic.applyLatestMissedCaller(
-            currentText = quickPhone,
-            currentLastMissedPhone = lastAppliedMissedPhone,
-            latestMissedPhone = latestMissedCaller?.phone?.let { PhoneNumberNormalizer.toLocalIsraeliDisplay(it) },
-            isActivelyEditing = quickPhoneEditing
-        )
-        quickPhone = next.text
-        lastAppliedMissedPhone = next.lastMissedPhone
-    }
+    val greeting = if (agentName.isBlank()) "שלום 👋" else "שלום $agentName 👋"
 
     Column(
         modifier = Modifier
@@ -606,183 +799,122 @@ private fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        ScreenHeader(title = "אני זמין/ה בכתב")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(AccessibilityIcons.Forum, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(20.dp))
-            Text(
-                text = "אם אני לא אוכל לענות לשיחה— השיחה תמשיך בכתב.",
-                fontWeight = FontWeight.Medium,
-                fontSize = 14.sp,
-                color = AccessibilityColors.TextBody
-            )
-        }
+        Text(
+            text = greeting,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 26.sp,
+            color = AccessibilityColors.Heading,
+            modifier = Modifier.fillMaxWidth()
+        )
+        // The promise, not a feature: "מענה" echoes forward into the first card.
+        Text(
+            text = "כדי שכל לקוח יקבל מענה, גם כשלא יכולת לענות.",
+            fontWeight = FontWeight.Medium,
+            fontSize = 15.sp,
+            color = AccessibilityColors.TextBody,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        AppCard(cornerRadius = 22) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    IconBadge(
-                        icon = AccessibilityIcons.Forum,
-                        background = AccessibilityColors.PrimaryContainer,
-                        tint = AccessibilityColors.Primary
-                    )
-                }
-                Text(
-                    text = "סטטוס השירות",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 18.sp,
-                    color = AccessibilityColors.Heading,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                // The single ranked status line (plan §1/§9) — the most important text in the
-                // product. Its tone drives the color; the row detail below is secondary.
-                Text(
-                    text = statusLine.label,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = homeServiceStatusLineColor(statusLine.tone),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    statusRows.forEach { row ->
-                        StatusChip(
-                            icon = homeServiceStatusIcon(row.kind),
-                            iconTint = homeServiceStatusIconTint(row.tone),
-                            label = row.label,
-                            trailingIcon = homeServiceStatusTrailingIcon(row.tone),
-                            trailingTint = homeServiceStatusTrailingTint(row.tone)
-                        )
-                    }
-                }
-            }
-        }
+        HomeMomentCard(
+            emoji = "📞",
+            title = "אם לא עניתי",
+            whyLines = "הלקוח יקבל ממך הודעה,\nכדי שלא יישאר בלי מענה.",
+            onEdit = onOpenMissedJourney
+        )
+
+        HomeMomentCard(
+            emoji = "🤝",
+            title = "אחרי שדיברנו",
+            whyLines = "שלח תזכורת וכרטיס ביקור,\nכדי שיזכור אותך גם בעוד יומיים.",
+            onEdit = onOpenEndedJourney
+        )
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        AppCard(cornerRadius = 22) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // §2 quiet line — one row, not a status block. When bridging is off, the missed-call
+        // card's "קורה אוטומטית" promise is not actually kept; this line lets the user turn it on.
+        HomeBridgingLine(
+            bridgingEnabled = bridgingEnabled,
+            bridgeReady = bridgeReady,
+            onToggleBridging = onToggleBridging
+        )
+    }
+}
+
+/**
+ * A giant home moment card: emoji + moment-title on one line with the state label trailing, the
+ * "why" sublines below, and an [ערוך] affordance. The whole card is tappable → journey page.
+ */
+@Composable
+private fun HomeMomentCard(
+    emoji: String,
+    title: String,
+    whyLines: String,
+    onEdit: () -> Unit
+) {
+    AppCard(cornerRadius = 22, modifier = Modifier.clickable(onClick = onEdit)) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = emoji, fontSize = 26.sp)
                 Text(
-                    text = "ההודעה שתישלח",
+                    text = title,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 18.sp,
-                    color = AccessibilityColors.Heading,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-                TemplateRoleToggle(
-                    selected = homeRole,
-                    onSelect = { homeRole = it },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                WhatsAppMessagePreview(message = selectedMessage, maxLines = 8)
-                OutlinePillButton(
-                    text = "ערוך הודעה",
-                    onClick = { editingMessage = true },
-                    borderColor = AccessibilityColors.Primary,
-                    contentColor = AccessibilityColors.Primary,
-                    leadingIcon = AccessibilityIcons.Edit
+                    fontSize = 20.sp,
+                    color = AccessibilityColors.Heading
                 )
             }
-        }
-
-        AppCard(cornerRadius = 22) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = HomeQuickWhatsAppUiSpec.TITLE,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 18.sp,
-                    color = AccessibilityColors.Heading,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    PillButton(
-                        text = HomeQuickWhatsAppUiSpec.BUTTON_TEXT,
-                        onClick = {
-                            quickStatus = null
-                            when (val plan = HomeQuickWhatsAppOpenPlanner.plan(quickPhone, selectedMessage)) {
-                                HomeQuickWhatsAppOpenPlan.InvalidNumber -> {
-                                    quickStatus = HomeQuickWhatsAppUiSpec.INVALID_NUMBER
-                                }
-                                is HomeQuickWhatsAppOpenPlan.OpenComposer -> {
-                                    val result = AccessibilityActions.openWhatsApp(context, plan.link, preferredWhatsAppPackage)
-                                    if (result == null) {
-                                        AccessibilityActions.logEntry(context, plan.successLogAction, plan.message, plan.normalizedPhone)
-                                        logEntries = logStore.load()
-                                        quickPhoneEditing = false
-                                    } else {
-                                        AccessibilityActions.logEntry(context, plan.failureLogAction, plan.message, plan.normalizedPhone)
-                                        logEntries = logStore.load()
-                                        quickStatus = HomeQuickWhatsAppUiSpec.WHATSAPP_FAILURE
-                                    }
-                                }
-                            }
-                        },
-                        background = AccessibilityColors.Green,
-                        leadingIcon = AccessibilityIcons.Chat,
-                        modifier = Modifier.width(146.dp)
-                    )
-                    OutlinedTextField(
-                        value = quickPhone,
-                        onValueChange = {
-                            quickPhone = it
-                            quickStatus = null
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = HomeQuickWhatsAppUiSpec.phoneKeyboardType),
-                        textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                            textDirection = TextDirection.Ltr,
-                            textAlign = TextAlign.Center
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .onFocusChanged { quickPhoneEditing = it.isFocused }
-                    )
-                }
-                quickStatus?.let { Text(it, color = AccessibilityColors.Danger, fontSize = 13.sp, modifier = Modifier.fillMaxWidth()) }
-            }
-        }
-
-        if (bridgingEnabled) {
-            PillButton(
-                text = if (bridgeReady) "גישור לשיחות פעיל" else "השלם הרשאות",
-                onClick = onToggleBridging,
-                background = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning,
-                leadingIcon = AccessibilityIcons.PhoneInTalk
+            Text(
+                text = whyLines,
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
+                color = AccessibilityColors.TextBody,
+                modifier = Modifier.fillMaxWidth()
             )
-            CaptionWithIcon(
-                text = if (bridgeReady) "מוכן לשיחות שלא נענו" else "חסרה הרשאה לזיהוי שיחות",
-                icon = if (bridgeReady) AccessibilityIcons.CheckCircle else AccessibilityIcons.Block,
-                color = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning
-            )
-        } else {
-            PillButton(
-                text = "הפעל גישור לשיחות",
-                onClick = onToggleBridging,
-                background = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.PhoneInTalk
-            )
-            CaptionWithIcon(
-                text = "כבוי — לא יישלחו הודעות אוטומטיות",
-                icon = AccessibilityIcons.Block,
-                color = AccessibilityColors.TextMuted
+            OutlinePillButton(
+                text = "ערוך",
+                onClick = onEdit,
+                borderColor = AccessibilityColors.Primary,
+                contentColor = AccessibilityColors.Primary,
+                leadingIcon = AccessibilityIcons.Edit
             )
         }
     }
+}
 
-    if (editingMessage && activeTemplate != null) {
-        // Edit the body only — the links are separate fields and are appended automatically.
-        // Passing the full composed text here would fold the links into the body and duplicate them.
-        HomeMessageEditorDialog(
-            message = activeTemplate.body,
-            onSave = { body ->
-                onSaveTemplateBody(activeTemplate.id, body)
-                editingMessage = false
-            },
-            onCancel = { editingMessage = false }
+/** The single quiet §2 line at the bottom of Home: turn the missed-call bridge on/off. */
+@Composable
+private fun HomeBridgingLine(
+    bridgingEnabled: Boolean,
+    bridgeReady: Boolean,
+    onToggleBridging: () -> Unit
+) {
+    if (bridgingEnabled) {
+        PillButton(
+            text = if (bridgeReady) "גישור לשיחות פעיל" else "השלם הרשאות",
+            onClick = onToggleBridging,
+            background = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning,
+            leadingIcon = AccessibilityIcons.PhoneInTalk
+        )
+        CaptionWithIcon(
+            text = if (bridgeReady) "מוכן לשיחות שלא נענו" else "חסרה הרשאה לזיהוי שיחות",
+            icon = if (bridgeReady) AccessibilityIcons.CheckCircle else AccessibilityIcons.Block,
+            color = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning
+        )
+    } else {
+        PillButton(
+            text = "הפעל גישור לשיחות",
+            onClick = onToggleBridging,
+            background = AccessibilityColors.Primary,
+            leadingIcon = AccessibilityIcons.PhoneInTalk
+        )
+        CaptionWithIcon(
+            text = "כבוי — לא יישלחו הודעות אוטומטיות",
+            icon = AccessibilityIcons.Block,
+            color = AccessibilityColors.TextMuted
         )
     }
 }
