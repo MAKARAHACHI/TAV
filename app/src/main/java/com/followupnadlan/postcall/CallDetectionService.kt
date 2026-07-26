@@ -19,8 +19,11 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import com.followupnadlan.MainActivity
 import com.followupnadlan.R
+import com.followupnadlan.accessibility.AllowedRecipientsStore
+import com.followupnadlan.accessibility.EndedScopeSettings
+import com.followupnadlan.missedcall.ContactVerifier
 import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
-import com.followupnadlan.notifications.FollowUpNotificationHelper
+import com.followupnadlan.notifications.EndedSuggestionNotificationHelper
 
 class CallDetectionService : Service() {
     private lateinit var monitor: CallStateMonitor
@@ -62,24 +65,53 @@ class CallDetectionService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Offers a follow-up after a conversation — but only when the call actually earns one.
+     * Previously every ended call produced a notification; the eligibility rules (answered, long
+     * enough, in scope, reachable number, not in cooldown) now live in [EndedSuggestionDecider].
+     */
     private fun postFollowUpNotificationAfterCallEnd() {
         mainHandler.postDelayed(
             {
-                val latestCall = CallLogReader(applicationContext).readLatestCall()
-                val contactFirstName = latestCall?.phoneNumber?.let {
-                    ContactNameResolver(applicationContext).resolveFirstName(it)
-                }
-                FollowUpNotificationHelper(applicationContext).showFollowUpNotification(
-                    phone = latestCall?.phoneNumber.orEmpty(),
-                    leadName = contactFirstName.orEmpty(),
-                    templateId = "",
-                    callDurationSeconds = latestCall?.durationSeconds,
-                    callTimestampMillis = latestCall?.timestampMillis,
-                    callType = latestCall?.type?.toNotificationExtra()
-                )
+                runCatching { offerFollowUpForLatestCall() }
             },
             CALL_LOG_READ_DELAY_MILLIS
         )
+    }
+
+    private fun offerFollowUpForLatestCall() {
+        val context = applicationContext
+        val latestCall = CallLogReader(context).readLatestCall() ?: return
+        val phone = latestCall.phoneNumber.orEmpty()
+        val now = System.currentTimeMillis()
+
+        val suggestionStore = EndedSuggestionStore(context)
+        val contactVerifier = ContactVerifier(context)
+        val decision = EndedSuggestionDecider.decide(
+            EndedSuggestionInput(
+                // An outgoing call counts too — the call you returned is exactly the one that
+                // deserves a follow-up. What matters is that a conversation actually happened.
+                wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L,
+                callDurationSeconds = latestCall.durationSeconds,
+                phoneNumber = phone,
+                isSavedContact = contactVerifier.isSavedContact(phone),
+                contactsPermissionGranted = contactVerifier.hasContactsPermission(),
+                scope = EndedScopeSettings(context).scope,
+                allowedNumbers = AllowedRecipientsStore(context).load().map { it.number },
+                lastSuggestedAtEpochMs = suggestionStore.lastSuggestedAt(phone),
+                lastAnyNotificationAtEpochMs = suggestionStore.lastAnyNotificationAt(),
+                nowEpochMs = now
+            )
+        )
+        if (decision != EndedSuggestionDecision.SUGGEST) return
+
+        val message = EndedFollowUpMessage.build(context)
+        if (message.isBlank()) return
+
+        // A name only when the number is genuinely saved; otherwise the number is the identity.
+        val displayName = ContactNameResolver(context).resolveFirstName(phone).orEmpty()
+        EndedSuggestionNotificationHelper(context).showSuggestion(phone, displayName, message)
+        suggestionStore.markSuggested(phone, now)
     }
 
     private fun registerCallListener() {

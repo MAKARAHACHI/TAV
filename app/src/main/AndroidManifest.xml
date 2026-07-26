@@ -50,6 +50,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- Handles "שלח" from the follow-up suggestion. Not exported: only our own
+             notification triggers it. -->
+        <receiver
+            android:name=".postcall.EndedSendReceiver"
+            android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
