@@ -436,8 +436,12 @@ class MissedCallAutoResponseHandler(private val context: Context) {
      * Renders the template and appends the signature line — §5: the signature closes *both* the
      * missed and the ended message, with no skip logic. On an empty/partial profile
      * [SignatureLine] drops what it cannot fill, so a placeholder never reaches a client.
+     *
+     * [attachCard] is honored so the ended journey's "מצורף" switch changes the message that is
+     * actually sent, not just its preview. It never applies to missed: there the signature is how
+     * the client knows who is answering them.
      */
-    private fun renderMessage(templateBody: String): String {
+    private fun renderMessage(templateBody: String, attachCard: Boolean = true): String {
         val profile = profileStore.load()
         val businessName = profile.officeName.ifBlank { profile.agentName }
         val rendered = TemplateTagRenderer.render(
@@ -452,7 +456,11 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                 signature = profile.signature
             )
         )
-        return SignatureLine.append(rendered, ContactCard.fromProfile(profile))
+        return if (attachCard) {
+            SignatureLine.append(rendered, ContactCard.fromProfile(profile))
+        } else {
+            rendered.trim()
+        }
     }
 
     private fun showManualFallback(phone: String, message: String) {

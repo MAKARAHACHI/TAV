@@ -173,6 +173,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val logStore = remember(context) { FollowUpLogStore(appContext) }
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
     val endedScopeSettings = remember(context) { EndedScopeSettings(appContext) }
+    val endedCardSettings = remember(context) { EndedCardSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
@@ -209,6 +210,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
     // The ended moment's own scope — a separate decision from missed (different jobs, §4).
     var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
+    var cardAttached by remember { mutableStateOf(endedCardSettings.cardAttached) }
     // The single explicit channel choice, read back from the engine's flag pair.
     var selectedChannel by remember { mutableStateOf(FollowUpChannelSettings.current(settings)) }
     var smsFallback by remember { mutableStateOf(settings.smsFallbackEnabled) }
@@ -544,10 +546,19 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             ContactCard.fromProfile(myDetailsStore.load())
                         }
                         EndedJourneyScreen(
-                            reminderMessage = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            reminderBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             card = endedCard,
+                            cardAttached = cardAttached,
+                            scopeLabel = endedScopeLabel(endedScope),
+                            channelLabel = channelLabel(selectedChannel),
                             onEditMessage = { messageEditorTarget = TemplateRole.CALL_ENDED },
                             onEditCard = { cardEditorOpen = true },
+                            onToggleCardAttached = {
+                                cardAttached = !cardAttached
+                                endedCardSettings.cardAttached = cardAttached
+                            },
+                            onEditScope = { endedScopePickerOpen = true },
+                            onEditChannel = { channelPickerOpen = true },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -691,16 +702,15 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     )
                 }
 
-                // Wiring Pass: "ערוך כרטיס ביקור" from the ended journey. Reuses the existing
-                // ContactCardScreen (which saves to MyDetailsStore itself); on back we bump
-                // profileRefresh so the ended journey's preview reloads. Full-screen Surface so it
-                // covers the journey underneath.
+                // Tapping the card in the ended preview edits its three fields in place. This is a
+                // dedicated editor rather than the older ContactCardScreen, whose copy is about
+                // sharing a vCard — a flow MVP-1 does not use.
                 if (cardEditorOpen) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = AccessibilityColors.ScreenBackground
                     ) {
-                        ContactCardScreen(
+                        SignatureCardEditorScreen(
                             store = myDetailsStore,
                             onBack = {
                                 cardEditorOpen = false
@@ -1038,10 +1048,16 @@ private fun JourneySwitchRow(
 // Display-only: "שנה"/"ערוך" are inert until the wiring pass.
 @Composable
 private fun EndedJourneyScreen(
-    reminderMessage: String,
+    reminderBody: String,
     card: ContactCard,
+    cardAttached: Boolean,
+    scopeLabel: String,
+    channelLabel: String,
     onEditMessage: () -> Unit,
     onEditCard: () -> Unit,
+    onToggleCardAttached: () -> Unit,
+    onEditScope: () -> Unit,
+    onEditChannel: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -1052,38 +1068,122 @@ private fun EndedJourneyScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         ModalHeader(title = "אחרי שדיברנו", onBack = onBack)
-        Text(
-            text = "אחרי שיחה תוכל לשלוח תזכורת וכרטיס ביקור.",
-            fontWeight = FontWeight.Medium,
-            fontSize = 15.sp,
-            lineHeight = 23.sp,
-            color = AccessibilityColors.TextBody,
-            modifier = Modifier.fillMaxWidth()
-        )
 
-        // 3 — the reminder text ("הודעה" → "תזכורת" in the lexicon).
-        JourneySectionLabel("התזכורת")
-        WhatsAppMessagePreview(message = reminderMessage, maxLines = 8)
-        OutlinePillButton(
-            text = "שנה את התזכורת",
-            onClick = onEditMessage,
-            borderColor = AccessibilityColors.Primary,
-            contentColor = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.Edit
+        // 1+2 — the follow-up message with the card sitting inside it, exactly as it will arrive.
+        // The card is part of the message, so it is shown inside the same bubble, not beside it.
+        JourneySectionLabel("הודעת ההמשך")
+        EndedMessagePreview(
+            body = reminderBody,
+            card = card,
+            cardAttached = cardAttached,
+            onEditBody = onEditMessage,
+            onEditCard = onEditCard,
+            onToggleCardAttached = onToggleCardAttached
         )
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // 4 — the business card that goes with the reminder.
-        JourneySectionLabel("כרטיס הביקור")
-        ContactCardPreview(card = card)
-        OutlinePillButton(
-            text = "ערוך כרטיס ביקור",
-            onClick = onEditCard,
-            borderColor = AccessibilityColors.Primary,
-            contentColor = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.Edit
+        // 3 — which conversations get an offer. Not "who receives" — nobody receives anything
+        // automatically here; this only controls when the suggestion appears.
+        JourneyResultRow(
+            title = "אחרי אילו שיחות להציע לשלוח?",
+            value = scopeLabel,
+            onClick = onEditScope
         )
+        // 4 — the channel, a separate setting from the missed moment's.
+        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
+    }
+}
+
+/**
+ * The follow-up message as the client receives it: an editable body, and the business card woven
+ * in as the closing line.
+ *
+ * The "מצורף" switch sits *on the card, inside the bubble* — flipping it removes the card from the
+ * preview live, so the user watches the message become what will actually be sent. A separate
+ * "האם לצרף כרטיס?" row would describe that instead of showing it.
+ */
+@Composable
+private fun EndedMessagePreview(
+    body: String,
+    card: ContactCard,
+    cardAttached: Boolean,
+    onEditBody: () -> Unit,
+    onEditCard: () -> Unit,
+    onToggleCardAttached: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+        color = Color(0xFFE4F8D8),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text(
+                text = body.ifBlank { " " },
+                color = AccessibilityColors.TextStrong,
+                fontSize = 18.sp,
+                lineHeight = 29.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onEditBody)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // The card itself, tappable to edit its three fields. When detached it disappears
+            // from the message and only the switch line remains, so the toggle stays reachable.
+            if (cardAttached) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onEditCard)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = card.fullName.ifBlank { "הוסף את שמך" },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = if (card.fullName.isBlank()) {
+                                AccessibilityColors.TextFaint
+                            } else {
+                                AccessibilityColors.TextStrong
+                            }
+                        )
+                        val detail = listOf(card.org, card.phone)
+                            .filter { it.isNotBlank() }
+                            .joinToString(SignatureLine.SEPARATOR)
+                        if (detail.isNotBlank()) {
+                            Text(
+                                text = detail,
+                                fontSize = 14.sp,
+                                color = AccessibilityColors.TextMuted
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "מצורף",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = AccessibilityColors.TextMuted
+                )
+                Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
+            }
+        }
     }
 }
 
@@ -2542,6 +2642,84 @@ private fun MyDetailRow(label: String, value: String, onEdit: () -> Unit) {
         Text(label, fontSize = 13.sp, color = AccessibilityColors.TextMuted, modifier = Modifier.weight(1f))
         Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextStrong, textAlign = TextAlign.End, modifier = Modifier.weight(1.4f))
         Icon(AccessibilityIcons.Edit, contentDescription = "ערוך", tint = AccessibilityColors.Primary, modifier = Modifier.size(18.dp).padding(start = 6.dp))
+    }
+}
+
+// ===================== SCREEN — THE BUSINESS CARD (3 fields) =====================
+/**
+ * Edits the three fields that make up the signature line: name · occupation · phone.
+ *
+ * Saves to [MyDetailsStore] — the same single source of truth the rest of the app reads, so a
+ * change here updates the missed message, the ended message and Home at once. It shows a live
+ * preview of the resulting line rather than describing it.
+ *
+ * "עיסוק" (not "שם עסק") is the deliberate wording: the client needs "עו״ד מקרקעין" to place who
+ * called them, not the firm's registered name.
+ */
+@Composable
+private fun SignatureCardEditorScreen(
+    store: MyDetailsStore,
+    onBack: () -> Unit
+) {
+    var profile by remember { mutableStateOf(store.load()) }
+    var fullName by remember { mutableStateOf(profile.agentName) }
+    var occupation by remember { mutableStateOf(profile.officeName) }
+    var phone by remember { mutableStateOf(profile.phone) }
+
+    fun persist() {
+        val trimmed = profile.copy(
+            agentName = fullName.trim(),
+            officeName = occupation.trim(),
+            phone = phone.trim()
+        )
+        store.save(trimmed)
+        profile = trimmed
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ModalHeader(title = "כרטיס הביקור", onBack = { persist(); onBack() })
+
+        OutlinedTextField(
+            value = fullName,
+            onValueChange = { fullName = it },
+            label = { Text("שם") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = occupation,
+            onValueChange = { occupation = it },
+            label = { Text("עיסוק") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = phone,
+            onValueChange = { phone = it },
+            label = { Text("טלפון") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // The line itself, as it will close the client's message.
+        val livePreview = SignatureLine.render(
+            ContactCard(fullName = fullName, org = occupation, phone = phone)
+        )
+        if (livePreview.isNotBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            WhatsAppMessagePreview(message = livePreview, maxLines = 3)
+        }
+
+        PillButton(text = "שמור", onClick = { persist(); onBack() })
     }
 }
 
