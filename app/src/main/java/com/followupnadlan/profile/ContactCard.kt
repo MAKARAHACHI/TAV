@@ -8,7 +8,9 @@ package com.followupnadlan.profile
 data class ContactCard(
     val fullName: String,
     val org: String,
-    val phone: String
+    val phone: String,
+    /** Optional; shown on the card and in the vCard only when filled. */
+    val website: String = ""
 ) {
     /** A card can be shared only once it has at least a name and a phone. */
     val isComplete: Boolean
@@ -18,7 +20,8 @@ data class ContactCard(
         fun fromProfile(profile: MyDetailsProfile): ContactCard = ContactCard(
             fullName = profile.agentName.trim(),
             org = profile.officeName.trim(),
-            phone = profile.phone.trim()
+            phone = profile.phone.trim(),
+            website = profile.website.trim()
         )
     }
 }

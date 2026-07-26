@@ -12,6 +12,8 @@ package com.followupnadlan.profile
  * name field, so no given/family split is invented. WhatsApp requires a present `N:` to offer
  * "add to contacts" instead of the business-view fallback (proven by the Stage 0 POC); an
  * `FN`-only card is treated as a business and cannot be added.
+ *
+ * `URL:` is emitted like `ORG:` — omitted entirely when blank, since the website field is optional.
  */
 object VCardBuilder {
     private const val CRLF = "\r\n"
@@ -26,6 +28,7 @@ object VCardBuilder {
             add("FN:${escape(card.fullName.trim())}")
             if (card.org.isNotBlank()) add("ORG:${escape(card.org.trim())}")
             add("TEL;TYPE=CELL:${escape(card.phone.trim())}")
+            if (card.website.isNotBlank()) add("URL:${escape(card.website.trim())}")
             add("END:VCARD")
         }
         return lines.joinToString(separator = CRLF, postfix = CRLF)

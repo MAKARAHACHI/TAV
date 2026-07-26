@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1019,17 +1020,18 @@ private fun MessageWithSignaturePreview(
     dimmed: Boolean,
     onEditBody: () -> Unit
 ) {
+    val colors = AccessibilityExtra.colors
     val alpha = if (dimmed) 0.45f else 1f
     Surface(
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-        color = Color(0xFFE4F8D8).copy(alpha = alpha),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8).copy(alpha = alpha)),
+        color = colors.bubbleGreen.copy(alpha = alpha),
+        shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
                 text = body.ifBlank { " " },
-                color = AccessibilityColors.TextStrong.copy(alpha = alpha),
+                color = colors.textStrong.copy(alpha = alpha),
                 fontSize = 18.sp,
                 lineHeight = 29.sp,
                 modifier = Modifier
@@ -1045,7 +1047,7 @@ private fun MessageWithSignaturePreview(
                 ) {
                     Text(
                         text = signature,
-                        color = AccessibilityColors.TextMuted.copy(alpha = alpha),
+                        color = colors.textMuted.copy(alpha = alpha),
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         modifier = Modifier.weight(1f)
@@ -1053,7 +1055,7 @@ private fun MessageWithSignaturePreview(
                     Icon(
                         AccessibilityIcons.Lock,
                         contentDescription = "שורת החתימה נקבעת מהפרטים שלך",
-                        tint = AccessibilityColors.TextFaint.copy(alpha = alpha),
+                        tint = colors.textFaint.copy(alpha = alpha),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1160,16 +1162,17 @@ private fun EndedMessagePreview(
     onEditCard: () -> Unit,
     onToggleCardAttached: () -> Unit
 ) {
+    val colors = AccessibilityExtra.colors
     Surface(
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-        color = Color(0xFFE4F8D8),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8)),
+        color = colors.bubbleGreen,
+        shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
                 text = body.ifBlank { " " },
-                color = AccessibilityColors.TextStrong,
+                color = colors.textStrong,
                 fontSize = 18.sp,
                 lineHeight = 29.sp,
                 modifier = Modifier
@@ -1179,12 +1182,12 @@ private fun EndedMessagePreview(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // The card itself, tappable to edit its three fields. When detached it disappears
+            // The card itself, tappable to edit its fields. When detached it disappears
             // from the message and only the switch line remains, so the toggle stays reachable.
             if (cardAttached) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color.White.copy(alpha = 0.75f),
+                    color = colors.surface.copy(alpha = 0.85f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onEditCard)
@@ -1195,23 +1198,39 @@ private fun EndedMessagePreview(
                     ) {
                         Text(
                             text = card.fullName.ifBlank { "הוסף את שמך" },
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             fontSize = 16.sp,
                             color = if (card.fullName.isBlank()) {
-                                AccessibilityColors.TextFaint
+                                colors.textFaint
                             } else {
-                                AccessibilityColors.TextStrong
+                                colors.textStrong
                             }
                         )
-                        val detail = listOf(card.org, card.phone)
-                            .filter { it.isNotBlank() }
-                            .joinToString(SignatureLine.SEPARATOR)
-                        if (detail.isNotBlank()) {
+                        if (card.org.isNotBlank()) {
                             Text(
-                                text = detail,
+                                text = card.org,
                                 fontSize = 14.sp,
-                                color = AccessibilityColors.TextMuted
+                                color = colors.textMuted
                             )
+                        }
+                        if (card.phone.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    AccessibilityIcons.Call,
+                                    contentDescription = null,
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = card.phone,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -1227,7 +1246,7 @@ private fun EndedMessagePreview(
                     text = "מצורף",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
-                    color = AccessibilityColors.TextMuted
+                    color = colors.textMuted
                 )
                 Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
             }
@@ -1309,9 +1328,11 @@ private fun HomeScreen(
 /** The ⚠️ line: what the client is experiencing, and the way to fix it. */
 @Composable
 private fun HomeWarningRow(text: String, onClick: () -> Unit) {
+    val colors = AccessibilityExtra.colors
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = AccessibilityColors.Warning.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(16.dp),
+        color = colors.dangerBg,
+        shadowElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -1327,13 +1348,13 @@ private fun HomeWarningRow(text: String, onClick: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
-                color = AccessibilityColors.TextStrong,
+                color = colors.danger,
                 modifier = Modifier.weight(1f)
             )
             Icon(
                 AccessibilityIcons.ChevronStart,
                 contentDescription = null,
-                tint = AccessibilityColors.TextMuted,
+                tint = colors.danger,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -1357,9 +1378,14 @@ private fun HomeMomentCard(
     footnote: String?,
     onOpen: () -> Unit
 ) {
+    val colors = AccessibilityExtra.colors
     val alpha = if (dimmed) 0.45f else 1f
-    AppCard(cornerRadius = 22, modifier = Modifier.clickable(onClick = onOpen)) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AppCard(
+        cornerRadius = 22,
+        background = colors.screenBackgroundAlt,
+        modifier = Modifier.clickable(onClick = onOpen)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1370,27 +1396,27 @@ private fun HomeMomentCard(
                     text = title,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 19.sp,
-                    color = AccessibilityColors.Heading,
+                    color = colors.heading,
                     modifier = Modifier.weight(1f)
                 )
                 Icon(
                     AccessibilityIcons.ChevronStart,
                     contentDescription = null,
-                    tint = AccessibilityColors.TextFaint,
+                    tint = colors.textFaint,
                     modifier = Modifier.size(20.dp)
                 )
             }
 
             Surface(
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
-                color = Color(0xFFE4F8D8).copy(alpha = alpha),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8).copy(alpha = alpha)),
+                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+                color = colors.bubbleGreen.copy(alpha = alpha),
+                shadowElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text(
                         text = body.ifBlank { " " },
-                        color = AccessibilityColors.TextStrong.copy(alpha = alpha),
+                        color = colors.textStrong.copy(alpha = alpha),
                         fontSize = 15.sp,
                         lineHeight = 23.sp,
                         maxLines = 4
@@ -1399,7 +1425,7 @@ private fun HomeMomentCard(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = signature,
-                            color = AccessibilityColors.TextMuted.copy(alpha = alpha),
+                            color = colors.textMuted.copy(alpha = alpha),
                             fontSize = 13.sp,
                             lineHeight = 20.sp,
                             maxLines = 1
@@ -1412,7 +1438,7 @@ private fun HomeMomentCard(
                 Text(
                     text = it,
                     fontSize = 13.sp,
-                    color = AccessibilityColors.TextMuted,
+                    color = colors.textMuted,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1430,9 +1456,13 @@ private fun TemplateRoleToggle(
     onSelect: (TemplateRole) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = AccessibilityExtra.colors
     Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.fieldGrey)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         TemplateRole.entries.forEach { role ->
             val isSelected = role == selected
@@ -1441,19 +1471,15 @@ private fun TemplateRoleToggle(
                 TemplateRole.CALL_ENDED -> "סיום שיחה"
             }
             Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (isSelected) AccessibilityColors.PrimaryContainer else Color.Transparent,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isSelected) AccessibilityColors.Primary else AccessibilityColors.TextFaint
-                ),
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) colors.primary else Color.Transparent,
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onSelect(role) }
             ) {
                 Text(
                     text = label,
-                    color = if (isSelected) AccessibilityColors.Primary else AccessibilityColors.TextBody,
+                    color = if (isSelected) Color.White else colors.textBody,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
@@ -1466,15 +1492,16 @@ private fun TemplateRoleToggle(
 
 @Composable
 private fun WhatsAppMessagePreview(message: String, maxLines: Int = 4) {
+    val colors = AccessibilityExtra.colors
     Surface(
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-        color = Color(0xFFE4F8D8),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8)),
+        color = colors.bubbleGreen,
+        shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
             text = message.ifBlank { " " },
-            color = AccessibilityColors.TextStrong,
+            color = colors.textStrong,
             fontSize = 18.sp,
             lineHeight = 29.sp,
             maxLines = maxLines,
@@ -1503,17 +1530,19 @@ private fun HomeMessageEditorDialog(
         onSave(draft)
     }
 
+    val colors = AccessibilityExtra.colors
     AlertDialog(
         modifier = Modifier
             .imePadding()
             .navigationBarsPadding(),
+        shape = RoundedCornerShape(22.dp),
         onDismissRequest = onCancel,
-        title = { Text(title, fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
+        title = { Text(title, fontWeight = FontWeight.ExtraBold, color = colors.heading) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     description,
-                    color = AccessibilityColors.TextMuted,
+                    color = colors.textMuted,
                     fontSize = 14.sp
                 )
                 OutlinedTextField(
@@ -1525,21 +1554,22 @@ private fun HomeMessageEditorDialog(
                     minLines = 6,
                     maxLines = 10,
                     keyboardActions = KeyboardActions(onDone = { saveDraft() }),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 180.dp, max = 310.dp)
                 )
-                error?.let { Text(it, color = AccessibilityColors.Danger, fontSize = 13.sp) }
+                error?.let { Text(it, color = colors.danger, fontSize = 13.sp) }
             }
         },
         confirmButton = {
             TextButton(onClick = { saveDraft() }) {
-                Text("שמור", fontWeight = FontWeight.Bold, color = AccessibilityColors.Primary)
+                Text("שמור", fontWeight = FontWeight.Bold, color = colors.primary)
             }
         },
         dismissButton = {
             TextButton(onClick = onCancel) {
-                Text("ביטול", color = AccessibilityColors.TextBody)
+                Text("ביטול", color = colors.textBody)
             }
         }
     )
@@ -2674,7 +2704,7 @@ private fun MyDetailsInlineCard(store: MyDetailsStore) {
                     )
                 }
             } else if (isEmpty) {
-                Text("עדיין לא מילאת פרטים", fontSize = 14.sp, color = AccessibilityColors.TextMuted)
+                Text("עדיין לא מילאת פרטים", fontSize = 14.sp, color = AccessibilityExtra.colors.textMuted)
                 NavigationRow(
                     label = "מלא עכשיו",
                     onClick = {
@@ -2689,7 +2719,7 @@ private fun MyDetailsInlineCard(store: MyDetailsStore) {
                 MyDetailRow("עיסוק", profile.officeName.ifBlank { "—" }) { editing = true }
 
                 // Preview of the card as it will be shared, so editing and preview live in one place.
-                val previewCard = ContactCard(fullName = profile.agentName, org = profile.officeName, phone = profile.phone)
+                val previewCard = ContactCard.fromProfile(profile)
                 if (previewCard.isComplete) {
                     Text("תצוגה מקדימה", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextMuted)
                     ContactCardPreview(previewCard)
@@ -2763,6 +2793,7 @@ private fun SystemSettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(AccessibilityExtra.colors.listBg)
             .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -3017,12 +3048,14 @@ private fun SignatureCardEditorScreen(
     var fullName by remember { mutableStateOf(profile.agentName) }
     var occupation by remember { mutableStateOf(profile.officeName) }
     var phone by remember { mutableStateOf(profile.phone) }
+    var website by remember { mutableStateOf(profile.website) }
 
     fun persist() {
         val trimmed = profile.copy(
             agentName = fullName.trim(),
             officeName = occupation.trim(),
-            phone = phone.trim()
+            phone = phone.trim(),
+            website = website.trim()
         )
         store.save(trimmed)
         profile = trimmed
@@ -3061,14 +3094,21 @@ private fun SignatureCardEditorScreen(
             textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
             modifier = Modifier.fillMaxWidth()
         )
-
-        // The line itself, as it will close the client's message.
-        val livePreview = SignatureLine.render(
-            ContactCard(fullName = fullName, org = occupation, phone = phone)
+        OutlinedTextField(
+            value = website,
+            onValueChange = { website = it },
+            label = { Text("אתר (אופציונלי)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
+            modifier = Modifier.fillMaxWidth()
         )
-        if (livePreview.isNotBlank()) {
+
+        // The card as it will actually be shared — website appears only when filled.
+        val livePreview = ContactCard(fullName = fullName, org = occupation, phone = phone, website = website)
+        if (livePreview.fullName.isNotBlank() || livePreview.phone.isNotBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
-            WhatsAppMessagePreview(message = livePreview, maxLines = 3)
+            ContactCardPreview(livePreview)
         }
 
         PillButton(text = "שמור", onClick = { persist(); onBack() })
@@ -3104,7 +3144,7 @@ private fun ContactCardScreen(
             text = "מלא/י את הפרטים פעם אחת כדי שאפשר יהיה לשלוח אותם ככרטיס איש קשר אחרי שיחה. " +
                 "הפרטים נשמרים במכשיר בלבד.",
             fontSize = 14.sp,
-            color = AccessibilityColors.TextMuted,
+            color = AccessibilityExtra.colors.textMuted,
             modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
@@ -3185,13 +3225,14 @@ private fun ContactCardScreen(
     }
 }
 
-/** A recipient's-eye preview of the contact card (name / office / phone). */
+/** A recipient's-eye preview of the contact card (name / occupation / phone / optional website). */
 @Composable
 private fun ContactCardPreview(card: ContactCard) {
+    val colors = AccessibilityExtra.colors
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = AccessibilityColors.SubtleSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AccessibilityColors.CardBorder),
+        color = colors.subtleSurface,
+        shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -3200,26 +3241,33 @@ private fun ContactCardPreview(card: ContactCard) {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             CircleAvatar(
-                background = AccessibilityColors.PrimaryContainer,
+                background = colors.primaryContainer,
                 icon = AccessibilityIcons.Person,
-                iconTint = AccessibilityColors.Primary,
+                iconTint = colors.primary,
                 boxSize = 46
             )
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = card.fullName.ifBlank { "שם מלא" },
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     fontSize = 16.sp,
-                    color = if (card.fullName.isBlank()) AccessibilityColors.TextFaint else AccessibilityColors.TextStrong
+                    color = if (card.fullName.isBlank()) colors.textFaint else colors.textStrong
                 )
                 if (card.org.isNotBlank()) {
-                    Text(card.org, fontSize = 13.sp, color = AccessibilityColors.TextMuted)
+                    Text(card.org, fontSize = 13.sp, color = colors.textMuted)
                 }
-                Text(
-                    text = card.phone.ifBlank { "טלפון" },
-                    fontSize = 14.sp,
-                    color = if (card.phone.isBlank()) AccessibilityColors.TextFaint else AccessibilityColors.TextBody
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(AccessibilityIcons.Call, contentDescription = null, tint = colors.primary, modifier = Modifier.size(13.dp))
+                    Text(
+                        text = card.phone.ifBlank { "טלפון" },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (card.phone.isBlank()) colors.textFaint else colors.primary
+                    )
+                }
+                if (card.website.isNotBlank()) {
+                    Text(card.website, fontSize = 13.sp, color = colors.textMuted)
+                }
             }
         }
     }

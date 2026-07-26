@@ -8,8 +8,12 @@ import org.junit.Test
 
 class VCardBuilderTest {
 
-    private fun card(fullName: String = "דניאל כהן", org: String = "נדל\"ן", phone: String = "0501234567") =
-        ContactCard(fullName = fullName, org = org, phone = phone)
+    private fun card(
+        fullName: String = "דניאל כהן",
+        org: String = "נדל\"ן",
+        phone: String = "0501234567",
+        website: String = ""
+    ) = ContactCard(fullName = fullName, org = org, phone = phone, website = website)
 
     @Test
     fun buildsWellFormedVCardWithCrlfSeparators() {
@@ -64,6 +68,36 @@ class VCardBuilderTest {
     @Test
     fun omitsOrgWhenWhitespaceOnly() {
         assertFalse(VCardBuilder.build(card(org = "   "))!!.contains("ORG:"))
+    }
+
+    @Test
+    fun omitsUrlWhenBlank() {
+        assertFalse(VCardBuilder.build(card(website = ""))!!.contains("URL:"))
+    }
+
+    @Test
+    fun omitsUrlWhenWhitespaceOnly() {
+        assertFalse(VCardBuilder.build(card(website = "   "))!!.contains("URL:"))
+    }
+
+    @Test
+    fun includesUrlWhenFilled() {
+        val vcard = VCardBuilder.build(card(website = "https://example.com"))!!
+        assertTrue(vcard.contains("URL:https://example.com\r\n"))
+        // URL sits right before END:VCARD.
+        assertTrue(vcard.contains("URL:https://example.com\r\nEND:VCARD\r\n"))
+    }
+
+    @Test
+    fun trimsSurroundingWhitespaceInUrl() {
+        val vcard = VCardBuilder.build(card(website = "  https://example.com  "))!!
+        assertTrue(vcard.contains("URL:https://example.com\r\n"))
+    }
+
+    @Test
+    fun escapesSpecialCharsInUrl() {
+        val vcard = VCardBuilder.build(card(website = "https://example.com/a;b,c"))!!
+        assertTrue(vcard.contains("URL:https://example.com/a\\;b\\,c\r\n"))
     }
 
     @Test
