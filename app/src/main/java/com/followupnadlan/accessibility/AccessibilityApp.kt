@@ -181,6 +181,16 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     }
     // Full-screen recipient multi-picker overlay (above the current tab/modal when non-null).
     var activePicker by remember { mutableStateOf<ActivePicker?>(null) }
+    // Wiring Pass step 1: which journey's message the "שנה את ההודעה/התזכורת" editor is open for
+    // (missed vs. ended, saved to separate templates). null = closed.
+    var messageEditorTarget by remember { mutableStateOf<TemplateRole?>(null) }
+    // Wiring Pass: journey-screen picker overlays (missed journey) and the ended journey's
+    // in-page contact-card editor.
+    var recipientPickerOpen by remember { mutableStateOf(false) }
+    var askPickerOpen by remember { mutableStateOf(false) }
+    var cardEditorOpen by remember { mutableStateOf(false) }
+    // Bumped after the contact card is edited from the ended journey so the preview reloads.
+    var profileRefresh by remember { mutableStateOf(0) }
     // Bumped whenever a recipient store is mutated, so Settings previews recompute.
     var recipientsRefresh by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -494,6 +504,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             recipientLabel = recipientScopeLabel(recipientScope),
                             askBeforeSend = askBeforeSend,
                             channelLabel = "WhatsApp",
+                            onEditMessage = { messageEditorTarget = TemplateRole.MISSED_CALL },
+                            onEditRecipient = { recipientPickerOpen = true },
+                            onEditAskBeforeSend = { askPickerOpen = true },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -502,9 +515,14 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         val endedTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.CALL_ENDED, selectedEndedId
                         )
+                        val endedCard = remember(profileRefresh) {
+                            ContactCard.fromProfile(myDetailsStore.load())
+                        }
                         EndedJourneyScreen(
                             reminderMessage = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
-                            card = ContactCard.fromProfile(myDetailsStore.load()),
+                            card = endedCard,
+                            onEditMessage = { messageEditorTarget = TemplateRole.CALL_ENDED },
+                            onEditCard = { cardEditorOpen = true },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -524,6 +542,100 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         onDone = { modal = AccessibilityModal.NONE }
                     )
                 }
+                }
+
+                // Wiring Pass step 1: the message/reminder editor, opened from a journey screen.
+                // Edits the template *body* only — links (card/website) stay in their own fields, so
+                // MessageComposition keeps appending them once (editing the composed text would bake
+                // the links into the body and duplicate them on the next send).
+                messageEditorTarget?.let { role ->
+                    val editingId = when (role) {
+                        TemplateRole.MISSED_CALL -> selectedMissedId
+                        TemplateRole.CALL_ENDED -> selectedEndedId
+                    }
+                    val editingTemplate = TemplateRoleSelector.forRole(templates, role, editingId)
+                    if (editingTemplate == null) {
+                        messageEditorTarget = null
+                    } else {
+                        val isReminder = role == TemplateRole.CALL_ENDED
+                        HomeMessageEditorDialog(
+                            message = editingTemplate.body,
+                            onSave = { newBody ->
+                                templateStore.saveTemplate(editingTemplate.copy(body = newBody))
+                                templates = templateStore.loadTemplates()
+                                messageEditorTarget = null
+                            },
+                            onCancel = { messageEditorTarget = null },
+                            title = if (isReminder) "עריכת התזכורת" else "עריכת ההודעה",
+                            description = if (isReminder)
+                                "זו התזכורת שתישלח ללקוח אחרי שיחה."
+                            else
+                                "זו ההודעה שתישלח ללקוח כשלא תוכל לענות.",
+                            emptyError = if (isReminder)
+                                "התזכורת לא יכולה להיות ריקה"
+                            else
+                                "ההודעה לא יכולה להיות ריקה"
+                        )
+                    }
+                }
+
+                // Wiring Pass: "מי יקבל את ההודעה?" — the 4-state recipient scope. Every state is
+                // honored by the engine's decide() (ANY_NUMBER / CONTACTS_ONLY / NON_CONTACTS_ONLY /
+                // ONLY_SELECTED), so exposing all four opens no §2 gap.
+                if (recipientPickerOpen) {
+                    JourneyOptionPickerDialog(
+                        title = "מי יקבל את ההודעה?",
+                        options = RecipientScope.values().map { it to recipientScopeLabel(it) },
+                        selected = recipientScope,
+                        onSelect = { scope ->
+                            recipientScope = scope
+                            recipientScopeSettings.scope = scope
+                            recipientPickerOpen = false
+                        },
+                        onDismiss = { recipientPickerOpen = false }
+                    )
+                }
+
+                // Wiring Pass: "האם לאשר לפני שליחה?" — maps to whatsappMode (PREPARED_MANUAL = ask,
+                // ACCESSIBILITY_AUTO = don't). Same mapping the Settings screen already persists.
+                if (askPickerOpen) {
+                    JourneyOptionPickerDialog(
+                        title = "האם לאשר לפני שליחה?",
+                        options = listOf(
+                            true to "כן, אאשר כל הודעה",
+                            false to "לא, תישלח גם בלי אישורי"
+                        ),
+                        selected = askBeforeSend,
+                        onSelect = { ask ->
+                            askBeforeSend = ask
+                            settings.whatsappMode = if (ask) {
+                                MissedCallWhatsAppMode.PREPARED_MANUAL
+                            } else {
+                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
+                            }
+                            askPickerOpen = false
+                        },
+                        onDismiss = { askPickerOpen = false }
+                    )
+                }
+
+                // Wiring Pass: "ערוך כרטיס ביקור" from the ended journey. Reuses the existing
+                // ContactCardScreen (which saves to MyDetailsStore itself); on back we bump
+                // profileRefresh so the ended journey's preview reloads. Full-screen Surface so it
+                // covers the journey underneath.
+                if (cardEditorOpen) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = AccessibilityColors.ScreenBackground
+                    ) {
+                        ContactCardScreen(
+                            store = myDetailsStore,
+                            onBack = {
+                                cardEditorOpen = false
+                                profileRefresh++
+                            }
+                        )
+                    }
                 }
 
                 SnackbarHost(
@@ -659,6 +771,39 @@ private fun JourneySectionLabel(text: String) {
     )
 }
 
+// Wiring Pass: a minimal single-choice picker used by the journey rows (recipient scope, ask-
+// before-send). Options are (value, label) pairs; picking one calls onSelect and closes. Design is
+// intentionally throwaway — the UI is scheduled to be re-skinned; this just makes the choice work.
+@Composable
+private fun <T> JourneyOptionPickerDialog(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    RadioRow(
+                        label = label,
+                        selected = value == selected,
+                        onClick = { onSelect(value) }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("סגור", color = AccessibilityColors.Primary)
+            }
+        }
+    )
+}
+
 // ===================== SCREEN 2 — "אם לא עניתי" (Design Pass 2) =====================
 // A stand-alone journey page (deep-link safe). Each row is a result that stands on its own —
 // no summary, no chips. Result-language only (Golden Rule): "מי יקבל את ההודעה?" answers with
@@ -670,6 +815,9 @@ private fun MissedJourneyScreen(
     recipientLabel: String,
     askBeforeSend: Boolean,
     channelLabel: String,
+    onEditMessage: () -> Unit,
+    onEditRecipient: () -> Unit,
+    onEditAskBeforeSend: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -694,7 +842,7 @@ private fun MissedJourneyScreen(
         WhatsAppMessagePreview(message = missedMessage, maxLines = 8)
         OutlinePillButton(
             text = "שנה את ההודעה",
-            onClick = { /* wiring pass */ },
+            onClick = onEditMessage,
             borderColor = AccessibilityColors.Primary,
             contentColor = AccessibilityColors.Primary,
             leadingIcon = AccessibilityIcons.Edit
@@ -702,20 +850,24 @@ private fun MissedJourneyScreen(
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // 4 — who receives it (result, not "recipient scope").
-        JourneyResultRow(title = "מי יקבל את ההודעה?", value = recipientLabel)
-        // 5 — the confirm-before-send decision, phrased as a result.
+        // 4 — who receives it (result, not "recipient scope"). Wired: opens the scope picker.
+        JourneyResultRow(title = "מי יקבל את ההודעה?", value = recipientLabel, onClick = onEditRecipient)
+        // 5 — the confirm-before-send decision, phrased as a result. Wired: opens the picker.
         JourneyResultRow(
             title = "האם לאשר לפני שליחה?",
-            value = if (askBeforeSend) "כן, אאשר כל הודעה" else "לא, תישלח גם בלי אישורי"
+            value = if (askBeforeSend) "כן, אאשר כל הודעה" else "לא, תישלח גם בלי אישורי",
+            onClick = onEditAskBeforeSend
         )
-        // 6 — how the client receives it (§2 — the code only knows installed/not).
+        // 6 — how the client receives it. Left display-only ("WhatsApp"): the engine has no
+        // "send exactly this channel, never fall back" state, so exposing a channel picker would
+        // let the user pick WhatsApp while SMS still sends behind their back (§2 false belief).
+        // Wiring the picker needs a new engine channel state — out of scope for this pass.
         JourneyResultRow(title = "איך הלקוח יקבל אותה?", value = channelLabel)
 
         Spacer(modifier = Modifier.height(2.dp))
 
         // 7 — cooldown, stated quietly. No picker.
-        JourneyQuietLine("לא נשלח שוב הודעה לאותו אדם במשך שעה.")
+        JourneyQuietLine("לא נשלח שוב לאותו אדם במשך יממה.")
     }
 }
 
@@ -728,6 +880,8 @@ private fun MissedJourneyScreen(
 private fun EndedJourneyScreen(
     reminderMessage: String,
     card: ContactCard,
+    onEditMessage: () -> Unit,
+    onEditCard: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -752,7 +906,7 @@ private fun EndedJourneyScreen(
         WhatsAppMessagePreview(message = reminderMessage, maxLines = 8)
         OutlinePillButton(
             text = "שנה את התזכורת",
-            onClick = { /* wiring pass */ },
+            onClick = onEditMessage,
             borderColor = AccessibilityColors.Primary,
             contentColor = AccessibilityColors.Primary,
             leadingIcon = AccessibilityIcons.Edit
@@ -765,7 +919,7 @@ private fun EndedJourneyScreen(
         ContactCardPreview(card = card)
         OutlinePillButton(
             text = "ערוך כרטיס ביקור",
-            onClick = { /* wiring pass */ },
+            onClick = onEditCard,
             borderColor = AccessibilityColors.Primary,
             contentColor = AccessibilityColors.Primary,
             leadingIcon = AccessibilityIcons.Edit
@@ -986,14 +1140,17 @@ private fun WhatsAppMessagePreview(message: String, maxLines: Int = 4) {
 private fun HomeMessageEditorDialog(
     message: String,
     onSave: (String) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    title: String = "עריכת ההודעה",
+    description: String = "זו ההודעה שתיפתח ב־WhatsApp או SMS לאחר שיחה שלא נענתה.",
+    emptyError: String = "ההודעה לא יכולה להיות ריקה"
 ) {
     var draft by remember(message) { mutableStateOf(message) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun saveDraft() {
         if (draft.isBlank()) {
-            error = "ההודעה לא יכולה להיות ריקה"
+            error = emptyError
             return
         }
         onSave(draft)
@@ -1004,11 +1161,11 @@ private fun HomeMessageEditorDialog(
             .imePadding()
             .navigationBarsPadding(),
         onDismissRequest = onCancel,
-        title = { Text("עריכת ההודעה", fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
+        title = { Text(title, fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "זו ההודעה שתיפתח ב־WhatsApp או SMS לאחר שיחה שלא נענתה.",
+                    description,
                     color = AccessibilityColors.TextMuted,
                     fontSize = 14.sp
                 )
@@ -2137,7 +2294,9 @@ private fun MyDetailsInlineCard(store: MyDetailsStore) {
                 OutlinedTextField(
                     value = org,
                     onValueChange = { org = it },
-                    label = { Text("שם משרד (לא חובה)") },
+                    // "עיסוק", not "שם עסק": we want "עו״ד מקרקעין" — what the client needs in
+                    // order to place you — not "לוי ושותפים", which means nothing to them.
+                    label = { Text("עיסוק") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -2180,7 +2339,7 @@ private fun MyDetailsInlineCard(store: MyDetailsStore) {
             } else {
                 MyDetailRow("שם", profile.agentName.ifBlank { "—" }) { editing = true }
                 MyDetailRow("טלפון", profile.phone.ifBlank { "—" }) { editing = true }
-                MyDetailRow("משרד", profile.officeName.ifBlank { "—" }) { editing = true }
+                MyDetailRow("עיסוק", profile.officeName.ifBlank { "—" }) { editing = true }
 
                 // Preview of the card as it will be shared, so editing and preview live in one place.
                 val previewCard = ContactCard(fullName = profile.agentName, org = profile.officeName, phone = profile.phone)
@@ -2277,7 +2436,7 @@ private fun ContactCardScreen(
         OutlinedTextField(
             value = org,
             onValueChange = { org = it; savedMessage = null },
-            label = { Text("שם משרד (לא חובה)") },
+            label = { Text("עיסוק") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )

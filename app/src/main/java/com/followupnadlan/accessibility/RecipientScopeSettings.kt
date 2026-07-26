@@ -20,14 +20,20 @@ class RecipientScopeSettings(context: Context) {
     var scope: RecipientScope
         get() = preferences.getString(KEY_SCOPE, null)
             ?.let { runCatching { RecipientScope.valueOf(it) }.getOrNull() }
-            ?: RecipientScope.ANY_NUMBER
+            ?: DEFAULT_SCOPE
         set(value) {
             preferences.edit().putString(KEY_SCOPE, value.name).apply()
         }
 
-    private companion object {
-        const val PREFERENCES_NAME = "recipient_scope_settings"
-        const val KEY_SCOPE = "scope"
+    companion object {
+        /**
+         * MVP-1 default: only people who aren't saved in the user's contacts. Auto-answering a
+         * spouse or a friend with "תודה שהתקשרת, אני כרגע לא פנוי" plus a business card is the
+         * embarrassment this default exists to prevent.
+         */
+        val DEFAULT_SCOPE = RecipientScope.NON_CONTACTS_ONLY
+        private const val PREFERENCES_NAME = "recipient_scope_settings"
+        private const val KEY_SCOPE = "scope"
     }
 }
 

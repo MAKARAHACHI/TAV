@@ -122,9 +122,9 @@ class MissedCallAutoResponseDecisionTest {
     }
 
     @Test
-    fun duplicateWithinSixHoursSkipsAllChannels() {
+    fun duplicateWithinTheDailyCooldownSkipsAllChannels() {
         val action = MissedCallAutoResponseDecision.decide(
-            defaultInput(lastAutoReplyAtEpochMs = 1_000, nowEpochMs = 1_000 + 5 * 60 * 60 * 1000L)
+            defaultInput(lastAutoReplyAtEpochMs = 1_000, nowEpochMs = 1_000 + 23 * 60 * 60 * 1000L)
         )
 
         assertEquals(MissedCallAutoResponseAction.SKIP_DUPLICATE, action)
@@ -133,10 +133,30 @@ class MissedCallAutoResponseDecisionTest {
     @Test
     fun sameNumberAfterCooldownAllowsManualPromptAgain() {
         val action = MissedCallAutoResponseDecision.decide(
-            defaultInput(lastAutoReplyAtEpochMs = 1_000, nowEpochMs = 1_000 + 6 * 60 * 60 * 1000L)
+            defaultInput(
+                lastAutoReplyAtEpochMs = 1_000,
+                nowEpochMs = 1_000 + FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS
+            )
         )
 
         assertEquals(MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT, action)
+    }
+
+    // MVP-1 §4: one message per person per day, not per six hours.
+    @Test
+    fun defaultCooldownIsTwentyFourHours() {
+        assertEquals(24 * 60 * 60 * 1000L, MissedCallAutoResponseDecision.DEFAULT_COOLDOWN_MILLIS)
+    }
+
+    // MVP-1 §4: numbers a client can't actually be reached on are filtered before anything is
+    // offered or sent — wa.me does not resolve for them, so replying promises an outcome that
+    // cannot happen.
+    @Test
+    fun serviceCodesAndTollFreeLinesSkipNoNumber() {
+        listOf("*6555", "#123", "1800123456", "1700700700").forEach { phone ->
+            val action = MissedCallAutoResponseDecision.decide(defaultInput(phoneNumber = phone))
+            assertEquals("expected skip for $phone", MissedCallAutoResponseAction.SKIP_NO_NUMBER, action)
+        }
     }
 
     @Test

@@ -78,7 +78,7 @@ class TemplateStoreTest {
         val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.ENDED_ID }
         assertEquals("סיום שיחה", template.title)
         assertEquals(TemplateRole.CALL_ENDED, template.role)
-        assert(template.body.startsWith("שלום, שמחתי לשוחח איתך.")) { "unexpected ended body: ${template.body}" }
+        assert(template.body.startsWith("תודה על השיחה!")) { "unexpected ended body: ${template.body}" }
     }
 
     @Test

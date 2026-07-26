@@ -16,7 +16,9 @@ import com.followupnadlan.notifications.MissedCallManualReplyNotificationHelper
 import com.followupnadlan.postcall.CallLogReader
 import com.followupnadlan.postcall.FollowUpCallType
 import com.followupnadlan.postcall.LatestCallLogEntry
+import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.profile.SignatureLine
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
 import com.followupnadlan.templates.TemplateRole
@@ -430,10 +432,15 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         isSavedContact = contactVerifier.isSavedContact(normalizedPhone ?: phone)
     )
 
+    /**
+     * Renders the template and appends the signature line — §5: the signature closes *both* the
+     * missed and the ended message, with no skip logic. On an empty/partial profile
+     * [SignatureLine] drops what it cannot fill, so a placeholder never reaches a client.
+     */
     private fun renderMessage(templateBody: String): String {
         val profile = profileStore.load()
         val businessName = profile.officeName.ifBlank { profile.agentName }
-        return TemplateTagRenderer.render(
+        val rendered = TemplateTagRenderer.render(
             templateBody,
             TemplateTagValues(
                 agentName = profile.agentName,
@@ -445,6 +452,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                 signature = profile.signature
             )
         )
+        return SignatureLine.append(rendered, ContactCard.fromProfile(profile))
     }
 
     private fun showManualFallback(phone: String, message: String) {

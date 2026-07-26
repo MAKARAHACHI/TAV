@@ -26,21 +26,14 @@ object SprintOneTemplates {
         id = ENDED_ID,
         title = "סיום שיחה",
         role = TemplateRole.CALL_ENDED,
-        body = """
-            שלום, שמחתי לשוחח איתך.
-            לכל שאלה או עדכון אפשר לכתוב לי כאן.
-            נשתמע בהמשך.
-        """.trimIndent()
+        body = "תודה על השיחה! שמח שדיברנו. מצרף את הפרטים שלי:"
     )
 
     val missed = MessageTemplate(
         id = MISSED_ID,
         title = "שיחה שלא נענתה",
         role = TemplateRole.MISSED_CALL,
-        body = """
-            היי, לא הספקתי לענות עכשיו.
-            אשמח לחזור אליך — במה אפשר לעזור?
-        """.trimIndent()
+        body = "תודה שהתקשרת, אני כרגע לא פנוי. אחזור אליך ברגע שאתפנה."
     )
 
     val all = listOf(ended, missed)

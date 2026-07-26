@@ -1,5 +1,7 @@
 package com.followupnadlan.missedcall
 
+import com.followupnadlan.whatsapp.DialableNumber
+
 enum class MissedCallDirection {
     INCOMING,
     OUTGOING,
@@ -78,7 +80,8 @@ enum class MissedCallAutoResponseAction {
 }
 
 object MissedCallAutoResponseDecision {
-    const val DEFAULT_COOLDOWN_MILLIS: Long = 6 * 60 * 60 * 1000L
+    /** One message per person per day (MVP-1 §4). Stated to the user, never offered as a control. */
+    const val DEFAULT_COOLDOWN_MILLIS: Long = FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS
 
     fun decide(input: MissedCallAutoResponseInput): MissedCallAutoResponseAction {
         val phone = input.phoneNumber.orEmpty().trim()
@@ -207,29 +210,11 @@ object MissedCallAutoResponseDecision {
         }
 
     /**
-     * A number is usable only if it is a real, dialable subscriber number: not a
-     * private/unknown/withheld label, not an emergency/service short code, and long
-     * enough to be a genuine phone number.
+     * A number is usable only if a real person can actually receive a message on it. Shared with
+     * the ended-suggestion path via [DialableNumber] so both moments filter identically — a
+     * toll-free line that gets no missed-call reply must not get a follow-up offer either.
      */
-    private fun isUsableNumber(phone: String): Boolean {
-        val trimmed = phone.trim()
-        if (trimmed.lowercase() in PRIVATE_OR_UNKNOWN_LABELS) return false
-
-        val digits = trimmed.filter { it.isDigit() }
-        if (digits.isEmpty()) return false
-        if (digits.length < MIN_SUBSCRIBER_DIGITS) return false
-        if (digits in EMERGENCY_OR_SERVICE_NUMBERS) return false
-
-        return true
-    }
-
-    private val PRIVATE_OR_UNKNOWN_LABELS =
-        setOf("unknown", "private", "anonymous", "restricted", "unavailable", "withheld", "blocked")
-
-    private val EMERGENCY_OR_SERVICE_NUMBERS =
-        setOf("100", "101", "102", "110", "112", "911", "999", "000")
-
-    private const val MIN_SUBSCRIBER_DIGITS = 7
+    private fun isUsableNumber(phone: String): Boolean = DialableNumber.isDialable(phone)
 }
 
 object AllowedRecipientDecisionMatcher {
