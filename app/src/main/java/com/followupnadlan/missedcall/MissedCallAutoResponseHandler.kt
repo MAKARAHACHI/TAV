@@ -145,6 +145,10 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                     now = now,
                     source = candidate.source
                 )
+                // §2: the user asked for messages to go out without their approval, but without
+                // the accessibility service nothing can press send — the chat just sits open. They
+                // believe the client was answered, so they have to be told they were not.
+                notifySendFailed(normalizedPhone.orEmpty(), message)
             }
             MissedCallAutoResponseAction.SHOW_MANUAL_REPLY_PROMPT -> {
                 appendLog(

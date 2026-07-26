@@ -148,6 +148,44 @@ class MissedCallAutoResponseDecisionTest {
         assertEquals(24 * 60 * 60 * 1000L, MissedCallAutoResponseDecision.DEFAULT_COOLDOWN_MILLIS)
     }
 
+    /*
+     * §2 regression: "לא, תישלח גם בלי אישורי" must actually auto-send. The engine gates
+     * auto-send on BOTH whatsappMode and whatsappAutomationEnabled, so a UI that sets only the
+     * mode leaves the user believing messages go out while the chat silently opens and waits.
+     */
+    @Test
+    fun autoSendRequiresBothTheModeAndTheAutomationFlag() {
+        val ready = defaultInput(
+            whatsappMode = MissedCallWhatsAppMode.ACCESSIBILITY_AUTO,
+            whatsappAutomationEnabled = true,
+            whatsappAccessibilityEnabled = true,
+            whatsappInstalled = true,
+            primaryChannel = MissedCallResponsePrimaryChannel.WHATSAPP_FIRST
+        )
+        assertEquals(MissedCallAutoResponseAction.ATTEMPT_WHATSAPP_AUTO_SEND, MissedCallAutoResponseDecision.decide(ready))
+
+        // Automation flag left false — this is the state the old UI produced.
+        assertEquals(
+            MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP,
+            MissedCallAutoResponseDecision.decide(ready.copy(whatsappAutomationEnabled = false))
+        )
+    }
+
+    // Accessibility off: nothing can press send, so this must not be reported as an auto-send.
+    @Test
+    fun reportsAccessibilityMissingRatherThanClaimingAnAutoSend() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(
+                whatsappMode = MissedCallWhatsAppMode.ACCESSIBILITY_AUTO,
+                whatsappAutomationEnabled = true,
+                whatsappAccessibilityEnabled = false,
+                whatsappInstalled = true,
+                primaryChannel = MissedCallResponsePrimaryChannel.WHATSAPP_FIRST
+            )
+        )
+        assertEquals(MissedCallAutoResponseAction.OPEN_PREPARED_WHATSAPP_ACCESSIBILITY_MISSING, action)
+    }
+
     // MVP-1 §4: numbers a client can't actually be reached on are filtered before anything is
     // offered or sent — wa.me does not resolve for them, so replying promises an outcome that
     // cannot happen.

@@ -737,6 +737,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             } else {
                                 MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
                             }
+                            // §2: choosing "תישלח גם בלי אישורי" *is* the request to send without
+                            // asking. The engine gates auto-send on this second flag as well, so
+                            // leaving it false would show the user a promise the engine ignores —
+                            // it would quietly open the chat and wait instead.
+                            settings.whatsappAutomationEnabled = !ask
                             askPickerOpen = false
                         },
                         onDismiss = { askPickerOpen = false }
