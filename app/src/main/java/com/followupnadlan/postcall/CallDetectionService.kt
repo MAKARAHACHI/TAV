@@ -24,6 +24,7 @@ import com.followupnadlan.accessibility.EndedScopeSettings
 import com.followupnadlan.missedcall.ContactVerifier
 import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
 import com.followupnadlan.notifications.EndedSuggestionNotificationHelper
+import com.followupnadlan.notifications.FollowUpFailureNotificationHelper
 
 class CallDetectionService : Service() {
     private lateinit var monitor: CallStateMonitor
@@ -44,6 +45,8 @@ class CallDetectionService : Service() {
         )
         startStatusNotification()
         diagnostics.setServiceActive(true)
+        // Running again — clear any "FollowUp הופסק" left over from the previous stop.
+        runCatching { FollowUpFailureNotificationHelper(applicationContext).cancelServiceStopped() }
         registerCallListener()
         runRecentMissedCallBackfill()
     }
@@ -62,7 +65,24 @@ class CallDetectionService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         unregisterCallListener()
         diagnostics.setServiceActive(false)
+        notifyIfStoppedUnexpectedly()
         super.onDestroy()
+    }
+
+    /**
+     * The service died while the user still expects it to be running — killed by the OEM battery
+     * manager, or a permission revoked. They may not open this app for weeks, so the ⚠️ line on
+     * Home cannot carry this alone: staying silent would let them believe clients are being
+     * answered when nobody is (§2).
+     *
+     * A deliberate switch-off is not a fault, so it is not reported.
+     */
+    private fun notifyIfStoppedUnexpectedly() {
+        val context = applicationContext
+        val userExpectsItRunning = CallDetectionPreferences(context).isEnabled()
+        if (!userExpectsItRunning) return
+
+        runCatching { FollowUpFailureNotificationHelper(context).showServiceStopped() }
     }
 
     /**

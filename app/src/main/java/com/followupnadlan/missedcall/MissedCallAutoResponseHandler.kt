@@ -12,6 +12,7 @@ import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.BlockedRecipientGroup
 import com.followupnadlan.accessibility.RecipientScope
 import com.followupnadlan.accessibility.RecipientScopeSettings
+import com.followupnadlan.notifications.FollowUpFailureNotificationHelper
 import com.followupnadlan.notifications.MissedCallManualReplyNotificationHelper
 import com.followupnadlan.postcall.CallLogReader
 import com.followupnadlan.postcall.FollowUpCallType
@@ -338,7 +339,12 @@ class MissedCallAutoResponseHandler(private val context: Context) {
             MissedCallAutoResponseAction.OPEN_MANUAL_FALLBACK -> {
                 showManualFallback(normalizedPhone, message)
             }
-            else -> appendLog(FollowUpActionType.FALLBACK_SMS_FAILED, now, normalizedPhone, message, source)
+            else -> {
+                // Nothing was sent and no manual path was offered — the client got nothing, so
+                // the user has to hear about it (§2).
+                appendLog(FollowUpActionType.FALLBACK_SMS_FAILED, now, normalizedPhone, message, source)
+                notifySendFailed(normalizedPhone, message)
+            }
         }
     }
 
@@ -381,6 +387,8 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                     message,
                     source
                 )
+                // The send failed outright: tell the user, and offer the manual path as well.
+                notifySendFailed(normalizedPhone, message)
                 showManualFallback(normalizedPhone, message)
             }
         }
@@ -461,6 +469,16 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         } else {
             rendered.trim()
         }
+    }
+
+    /**
+     * A missed-call reply that did not go out. §2: without this the user believes their client
+     * was answered when they were not — the most damaging false belief the app can create, since
+     * the whole promise is "nobody is left without a reply".
+     */
+    private fun notifySendFailed(phone: String, message: String) {
+        if (phone.isBlank()) return
+        FollowUpFailureNotificationHelper(context).showSendFailed(phone, message)
     }
 
     private fun showManualFallback(phone: String, message: String) {
