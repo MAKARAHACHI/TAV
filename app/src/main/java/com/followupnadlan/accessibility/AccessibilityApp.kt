@@ -78,6 +78,8 @@ import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.profile.SignatureLine
+import com.followupnadlan.setup.PermissionSnapshot
+import com.followupnadlan.setup.PermissionStatusLogic
 import com.followupnadlan.sharing.ContactCardShareResult
 import com.followupnadlan.sharing.PrepareAndShareContactCard
 import com.followupnadlan.templates.MessageComposition
@@ -578,49 +580,28 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         )
                     }
 
-                    // Filled in by the system-settings stage; routed here so the ⚙️ is live.
-                    AccessibilityModal.SYSTEM_SETTINGS -> SettingsScreen(
-                        askBeforeSend = askBeforeSend,
-                        recipientScope = recipientScope,
-                        preferredWhatsApp = preferredWhatsApp,
-                        showWhatsAppChoice = whatsappAvailability.businessInstalled,
-                        smsFallback = smsFallback,
-                        allowedPreview = RecipientPreviewLogic.summary(allowedRecipientsStore.load().map { it.label }),
-                        exclusionsPreview = RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label }),
-                        onSelectAskBeforeSend = { ask ->
-                            askBeforeSend = ask
-                            settings.whatsappMode = if (ask) {
-                                MissedCallWhatsAppMode.PREPARED_MANUAL
-                            } else {
-                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
-                            }
+                    AccessibilityModal.SYSTEM_SETTINGS -> SystemSettingsScreen(
+                        permissions = PermissionSnapshot(
+                            phoneStateGranted = phoneStateGranted,
+                            callLogGranted = callLogGranted,
+                            contactsGranted = context.hasPermission(Manifest.permission.READ_CONTACTS)
+                        ),
+                        exclusionsPreview = remember(recipientsRefresh) {
+                            RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label })
                         },
-                        onSelectRecipientScope = { scope ->
-                            recipientScope = scope
-                            recipientScopeSettings.scope = scope
-                        },
-                        onSelectWhatsApp = { choice ->
-                            preferredWhatsApp = choice
-                            settings.preferredWhatsAppPackage = when (choice) {
-                                WhatsAppChoice.BUSINESS -> WhatsAppPackageResolver.WHATSAPP_BUSINESS_PACKAGE
-                                WhatsAppChoice.REGULAR -> WhatsAppPackageResolver.WHATSAPP_MESSENGER_PACKAGE
-                            }
-                        },
-                        onToggleSmsFallback = {
-                            val next = !smsFallback
-                            if (next && context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-                                smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
-                            } else {
-                                settings.smsFallbackEnabled = next
-                                smsFallback = next
-                            }
+                        diagnosticsSnapshot = diagnosticsSnapshot,
+                        onRequestPermissions = {
+                            callDetectionPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.READ_PHONE_STATE,
+                                    Manifest.permission.READ_CALL_LOG,
+                                    Manifest.permission.READ_CONTACTS
+                                )
+                            )
                         },
                         onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
-                        onOpenAllowedRecipients = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
-                        onOpenTemplates = { modal = AccessibilityModal.TEMPLATES },
                         onDeleteHistory = { logStore.clear() },
-                        myDetailsStore = myDetailsStore,
-                        diagnosticsSnapshot = diagnosticsSnapshot
+                        onBack = { modal = AccessibilityModal.NONE }
                     )
 
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
@@ -786,10 +767,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 )
             }
 
-            // Bottom navigation is hidden while a full-screen modal or picker is open.
-            if (modal == AccessibilityModal.NONE && activePicker == null) {
-                BottomNav(selected = tab, onSelect = { tab = it })
-            }
+            // MVP-1 has no bottom navigation: the product is Home plus the two journeys, and
+            // ⚙️ is reached from the small icon on Home rather than from a tab. "היום" belongs to
+            // the deferred assistant layer. Both screens and their tabs remain in the code,
+            // simply not surfaced — see AccessibilityTab.
         }
     }
 }
@@ -2741,6 +2722,213 @@ private fun MyDetailRow(label: String, value: String, onEdit: () -> Unit) {
         Text(label, fontSize = 13.sp, color = AccessibilityColors.TextMuted, modifier = Modifier.weight(1f))
         Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AccessibilityColors.TextStrong, textAlign = TextAlign.End, modifier = Modifier.weight(1.4f))
         Icon(AccessibilityIcons.Edit, contentDescription = "ערוך", tint = AccessibilityColors.Primary, modifier = Modifier.size(18.dp).padding(start = 6.dp))
+    }
+}
+
+// ===================== SCREEN — ⚙️ SYSTEM SETTINGS (hidden) =====================
+/**
+ * System maintenance, reached only from the small ⚙️ on Home.
+ *
+ * Everything that *is* a journey decision (the message, who receives it, whether to confirm, which
+ * channel) lives inside its journey — this screen deliberately does not repeat any of it. What
+ * remains here is upkeep: permissions, privacy, the exclusion list, data, and diagnostics.
+ *
+ * System vocabulary is allowed here, because this is the one place a user comes looking for it.
+ * There is no licence row and no language picker: MVP-1 is Hebrew-only, and offering a switch
+ * that changes nothing would be a promise the app does not keep.
+ */
+@Composable
+private fun SystemSettingsScreen(
+    permissions: PermissionSnapshot,
+    exclusionsPreview: RecipientPreview,
+    diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot,
+    onRequestPermissions: () -> Unit,
+    onOpenExclusions: () -> Unit,
+    onDeleteHistory: () -> Unit,
+    onBack: () -> Unit
+) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleted by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        ModalHeader(title = "הגדרות", onBack = onBack)
+
+        // Permissions — live state. This is the engine behind the ⚠️ line and the fault
+        // notification, so it shows the real count, not a stored value.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "הרשאות",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = AccessibilityColors.Heading
+                    )
+                    Text(
+                        PermissionStatusLogic.summary(permissions),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = if (PermissionStatusLogic.canAnswerCalls(permissions)) {
+                            AccessibilityColors.Green
+                        } else {
+                            AccessibilityColors.Warning
+                        }
+                    )
+                }
+
+                // One row per permission, each stating what the user gets from it.
+                PermissionStatusLogic.all.forEach { permission ->
+                    val granted = permissions.isGranted(permission)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp)
+                    ) {
+                        Icon(
+                            if (granted) AccessibilityIcons.CheckCircle else AccessibilityIcons.Block,
+                            contentDescription = null,
+                            tint = if (granted) AccessibilityColors.Green else AccessibilityColors.TextFaint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            PermissionStatusLogic.outcome(permission),
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            color = AccessibilityColors.TextBody,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                if (!PermissionStatusLogic.canAnswerCalls(permissions)) {
+                    PillButton(text = "אפשר הרשאות", onClick = onRequestPermissions)
+                }
+            }
+        }
+
+        // Who never gets a message, regardless of the journey's scope.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            NavigationRowContent(
+                label = if (exclusionsPreview.count == 0) {
+                    "למי לא לשלוח?"
+                } else {
+                    "למי לא לשלוח? · ${exclusionsPreview.count}"
+                },
+                leadingIcon = AccessibilityIcons.Block,
+                leadingTint = AccessibilityColors.Primary,
+                onClick = onOpenExclusions
+            )
+        }
+
+        // Privacy, stated plainly: there is no server to talk about.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SettingsSectionTitle("פרטיות", bottomPadding = 4)
+                Text(
+                    "כל הנתונים נשמרים במכשיר שלך בלבד. אין שרת, אין חשבון, " +
+                        "ואין העברת מידע לשום גורם.",
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = AccessibilityColors.TextBody
+                )
+            }
+        }
+
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDeleteDialog = true }
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Icon(
+                        AccessibilityIcons.Delete,
+                        contentDescription = null,
+                        tint = AccessibilityColors.Danger,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        "מחק היסטוריה",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = AccessibilityColors.TextStrong
+                    )
+                }
+                Icon(
+                    AccessibilityIcons.ChevronStart,
+                    contentDescription = null,
+                    tint = AccessibilityColors.UnselectedIcon,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        if (deleted) {
+            Text(
+                "ההיסטוריה נמחקה.",
+                color = AccessibilityColors.Primary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+
+        // Diagnostics: the only place technical detail belongs.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                SettingsSectionTitle("עזרה ותמיכה", bottomPadding = 4)
+                DiagnosticRow(
+                    "אירוע אחרון",
+                    CallDetectionDiagnosticsLabels
+                        .event(diagnosticsSnapshot.lastPhoneStateEvent.ifBlank { diagnosticsSnapshot.lastEvent })
+                        .ifBlank { "אין עדיין" }
+                )
+                DiagnosticRow("מספר אחרון", diagnosticsSnapshot.lastIncomingNumber.ifBlank { "לא זוהה" })
+                DiagnosticRow("מקלט", if (diagnosticsSnapshot.receiverActive) "פעיל" else "לא נרשם")
+                DiagnosticRow("שירות רקע", if (diagnosticsSnapshot.serviceActive) "פעיל" else "כבוי")
+            }
+        }
+
+        Text(
+            "FollowUp · גרסה ${com.followupnadlan.BuildConfig.VERSION_NAME}",
+            fontSize = 12.sp,
+            color = AccessibilityColors.TextFaint,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("למחוק את ההיסטוריה?", fontWeight = FontWeight.Bold) },
+            text = { Text("הפעולה אינה הפיכה.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteHistory()
+                    deleted = true
+                    showDeleteDialog = false
+                }) {
+                    Text("מחק", fontWeight = FontWeight.Bold, color = AccessibilityColors.Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("ביטול", color = AccessibilityColors.TextBody)
+                }
+            }
+        )
     }
 }
 
