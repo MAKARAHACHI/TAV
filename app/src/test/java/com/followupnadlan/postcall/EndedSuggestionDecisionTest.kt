@@ -1,6 +1,7 @@
 package com.followupnadlan.postcall
 
 import com.followupnadlan.accessibility.RecipientScope
+import com.followupnadlan.missedcall.FollowUpConstants
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -8,7 +9,6 @@ class EndedSuggestionDecisionTest {
     private val now = 1_000_000L
 
     private fun input(
-        wasAnswered: Boolean = true,
         callDurationSeconds: Long = 120,
         phoneNumber: String? = "0521234567",
         isSavedContact: Boolean = false,
@@ -16,9 +16,10 @@ class EndedSuggestionDecisionTest {
         scope: RecipientScope = RecipientScope.NON_CONTACTS_ONLY,
         allowedNumbers: List<String> = emptyList(),
         lastSuggestedAtEpochMs: Long? = null,
-        lastAnyNotificationAtEpochMs: Long? = null
+        lastAnyNotificationAtEpochMs: Long? = null,
+        sameNumberCooldownMillis: Long? = FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS,
+        globalQuietMillis: Long? = FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS
     ) = EndedSuggestionInput(
-        wasAnswered = wasAnswered,
         callDurationSeconds = callDurationSeconds,
         phoneNumber = phoneNumber,
         isSavedContact = isSavedContact,
@@ -27,6 +28,8 @@ class EndedSuggestionDecisionTest {
         allowedNumbers = allowedNumbers,
         lastSuggestedAtEpochMs = lastSuggestedAtEpochMs,
         lastAnyNotificationAtEpochMs = lastAnyNotificationAtEpochMs,
+        sameNumberCooldownMillis = sameNumberCooldownMillis,
+        globalQuietMillis = globalQuietMillis,
         nowEpochMs = now
     )
 
@@ -35,25 +38,33 @@ class EndedSuggestionDecisionTest {
         assertEquals(EndedSuggestionDecision.SUGGEST, EndedSuggestionDecider.decide(input()))
     }
 
+    /**
+     * A call you could not take is the strongest follow-up case there is, so it suggests like any
+     * other. The missed-call engine may also reply to it — that is a different message ("sorry I
+     * missed you") on a different channel, not a duplicate of this one.
+     */
     @Test
-    fun skipsCallsThatWereNeverAnswered() {
+    fun suggestsAfterACallThatWasNeverAnswered() {
         assertEquals(
-            EndedSuggestionDecision.SKIP_NOT_ANSWERED,
-            EndedSuggestionDecider.decide(input(wasAnswered = false))
+            EndedSuggestionDecision.SUGGEST,
+            EndedSuggestionDecider.decide(input(callDurationSeconds = 0))
         )
     }
 
-    // 60s threshold: wrong numbers and "sorry, driving" are not follow-up material.
+    /**
+     * No length rule at all. "Perfect, send me the details" is a real conversation and takes
+     * seconds; the suggestion is silent, so a threshold could only lose those to save a
+     * notification that costs nothing to dismiss.
+     */
     @Test
-    fun skipsConversationsShorterThanTheThreshold() {
-        assertEquals(
-            EndedSuggestionDecision.SKIP_TOO_SHORT,
-            EndedSuggestionDecider.decide(input(callDurationSeconds = 59))
-        )
-        assertEquals(
-            EndedSuggestionDecision.SUGGEST,
-            EndedSuggestionDecider.decide(input(callDurationSeconds = 60))
-        )
+    fun suggestsAfterAnAnsweredCallOfAnyLength() {
+        listOf(1L, 5L, 40L, 59L, 60L, 600L).forEach { seconds ->
+            assertEquals(
+                "expected suggest for ${seconds}s",
+                EndedSuggestionDecision.SUGGEST,
+                EndedSuggestionDecider.decide(input(callDurationSeconds = seconds))
+            )
+        }
     }
 
     @Test
@@ -153,5 +164,88 @@ class EndedSuggestionDecisionTest {
 
         val settled = input(lastAnyNotificationAtEpochMs = now - 61_000L)
         assertEquals(EndedSuggestionDecision.SUGGEST, EndedSuggestionDecider.decide(settled))
+    }
+
+    // ===== both brakes are the user's to retime or switch off =====
+
+    /** Switching the per-number cooldown off means the same person can be suggested twice running. */
+    @Test
+    fun sameNumberCooldownSwitchedOffSuggestsAgainImmediately() {
+        val secondsAgo = input(
+            lastSuggestedAtEpochMs = now - 1_000L,
+            sameNumberCooldownMillis = null
+        )
+
+        assertEquals(EndedSuggestionDecision.SUGGEST, EndedSuggestionDecider.decide(secondsAgo))
+    }
+
+    /** Switching the quiet window off lets a burst of calls produce a burst of suggestions. */
+    @Test
+    fun globalQuietWindowSwitchedOffAllowsABurst() {
+        val secondsAgo = input(
+            lastAnyNotificationAtEpochMs = now - 1_000L,
+            globalQuietMillis = null
+        )
+
+        assertEquals(EndedSuggestionDecision.SUGGEST, EndedSuggestionDecider.decide(secondsAgo))
+    }
+
+    /** With both off, nothing throttles: every eligible call suggests. */
+    @Test
+    fun bothBrakesOffSuggestsOnEveryCall() {
+        val justSuggestedToThisVeryNumber = input(
+            lastSuggestedAtEpochMs = now - 1_000L,
+            lastAnyNotificationAtEpochMs = now - 1_000L,
+            sameNumberCooldownMillis = null,
+            globalQuietMillis = null
+        )
+
+        assertEquals(EndedSuggestionDecision.SUGGEST, EndedSuggestionDecider.decide(justSuggestedToThisVeryNumber))
+    }
+
+    /** A shortened cooldown is honored as written, not clamped to the old 24-hour default. */
+    @Test
+    fun aShortenedSameNumberCooldownIsHonored() {
+        val oneHour = 60 * 60 * 1000L
+
+        assertEquals(
+            EndedSuggestionDecision.SKIP_COOLDOWN,
+            EndedSuggestionDecider.decide(
+                input(lastSuggestedAtEpochMs = now - 59 * 60 * 1000L, sameNumberCooldownMillis = oneHour)
+            )
+        )
+        assertEquals(
+            EndedSuggestionDecision.SUGGEST,
+            EndedSuggestionDecider.decide(
+                input(lastSuggestedAtEpochMs = now - oneHour, sameNumberCooldownMillis = oneHour)
+            )
+        )
+    }
+
+    /** A lengthened cooldown is honored too — a week means a week. */
+    @Test
+    fun aLengthenedSameNumberCooldownIsHonored() {
+        val week = 7 * 24 * 60 * 60 * 1000L
+
+        assertEquals(
+            EndedSuggestionDecision.SKIP_COOLDOWN,
+            EndedSuggestionDecider.decide(
+                input(lastSuggestedAtEpochMs = now - 3 * 24 * 60 * 60 * 1000L, sameNumberCooldownMillis = week)
+            )
+        )
+    }
+
+    /**
+     * The per-number cooldown is reported ahead of the quiet window when both apply, so the reason
+     * the user would recognise ("I just spoke to them") is the one that surfaces.
+     */
+    @Test
+    fun theSameNumberCooldownIsReportedAheadOfTheQuietWindow() {
+        val bothApply = input(
+            lastSuggestedAtEpochMs = now - 1_000L,
+            lastAnyNotificationAtEpochMs = now - 1_000L
+        )
+
+        assertEquals(EndedSuggestionDecision.SKIP_COOLDOWN, EndedSuggestionDecider.decide(bothApply))
     }
 }

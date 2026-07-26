@@ -4,12 +4,13 @@ import android.content.Context
 import com.followupnadlan.whatsapp.PhoneNumberNormalizer
 
 /**
- * Remembers when a follow-up was last suggested, so the same person is not asked about twice in a
- * day and notifications cannot arrive in a burst.
+ * Remembers when a follow-up was last suggested: one timestamp per number, plus one global
+ * timestamp for the anti-burst window. Both feed
+ * [com.followupnadlan.accessibility.FollowUpCooldownSettings], whose windows the user controls.
  *
- * Deliberately *not* a history: one timestamp per number, overwritten each time, plus one global
- * timestamp. There is no list, no count and nothing to browse — this is a cooldown ledger, not a
- * record of who was called. The device's own contacts remain the only real memory.
+ * Deliberately *not* a history: each timestamp is overwritten in place. There is no list, no count
+ * and nothing to browse — this is a cooldown ledger, not a record of who was called. The device's
+ * own contacts remain the only real memory.
  */
 class EndedSuggestionStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)

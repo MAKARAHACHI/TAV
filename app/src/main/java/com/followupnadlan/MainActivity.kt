@@ -34,7 +34,6 @@ import com.followupnadlan.postcall.CallDetectionServiceLifecycle
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        syncCallDetectionService()
         val launch = missedCallLaunchFromIntent(intent)
         setContent {
             AccessibilityTheme {
@@ -45,6 +44,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Every foreground visit re-raises the detection service, not just a cold start.
+     *
+     * The service is what turns an ended conversation into a follow-up suggestion, and it is the
+     * only path that does — [com.followupnadlan.postcall.PhoneStateReceiver] handles missed calls
+     * on its own but has nothing for ended ones. That receiver also cannot revive the service:
+     * starting a foreground service from a background broadcast is forbidden on Android 12+, so
+     * its start() call fails silently, and a call ending is exactly when nothing else is running.
+     * Doing this from a resumed Activity is permitted, so the app coming to the foreground is the
+     * one moment we can reliably repair a service the OEM battery manager killed.
+     *
+     * onCreate alone was not enough: returning to a still-created Activity skips it entirely.
+     */
+    override fun onResume() {
+        super.onResume()
+        syncCallDetectionService()
     }
 
     private fun syncCallDetectionService() {

@@ -13,12 +13,28 @@ import com.followupnadlan.whatsapp.DialableNumber
  * simple: perfect filtering is impossible (a lead and opposing counsel look identical to a phone),
  * so the design makes the mistake cheap rather than making the filter clever.
  *
- * Applies to outgoing calls too: the call you returned is exactly the one that deserves a follow-up.
+ * Neither length nor outcome is one of the rules. Every call ending gets a suggestion — answered or
+ * not, incoming or outgoing, one second or one hour:
+ *
+ *  - **Length**: a short call is not reliably a worthless one. "Perfect, send me the details" takes
+ *    fifteen seconds.
+ *  - **Outgoing**: the call you returned is exactly the one that deserves a follow-up.
+ *  - **Unanswered**: a call you could not take is the strongest follow-up case there is. The
+ *    missed-call engine may also reply to it, but that is a *different* message on a different
+ *    channel — [com.followupnadlan.missedcall.MissedCallAutoResponseHandler] sends the "sorry I
+ *    missed you" text, while this offers the user's details. The cooldowns below keep the second
+ *    one from repeating.
+ *
+ * The suggestion is silent and dismissible, so a wrong "yes" costs a glance. Every filter removed
+ * here was capable of losing a real conversation to save a notification that costs nothing.
+ *
+ * What remains are the two *timing* brakes, and both are now the user's to set or switch off from
+ * ⚙️ — see [com.followupnadlan.accessibility.FollowUpCooldownSettings]. A `null` window means the
+ * user turned that brake off, which is honored exactly as written.
  *
  * Pure logic, no Android — see EndedSuggestionDecisionTest.
  */
 data class EndedSuggestionInput(
-    val wasAnswered: Boolean,
     val callDurationSeconds: Long,
     val phoneNumber: String?,
     val isSavedContact: Boolean,
@@ -27,13 +43,15 @@ data class EndedSuggestionInput(
     val allowedNumbers: List<String> = emptyList(),
     val lastSuggestedAtEpochMs: Long? = null,
     val lastAnyNotificationAtEpochMs: Long? = null,
+    /** Per-number cooldown; `null` when the user switched it off. */
+    val sameNumberCooldownMillis: Long? = FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS,
+    /** Global anti-burst window; `null` when the user switched it off. */
+    val globalQuietMillis: Long? = FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS,
     val nowEpochMs: Long
 )
 
 enum class EndedSuggestionDecision {
     SUGGEST,
-    SKIP_NOT_ANSWERED,
-    SKIP_TOO_SHORT,
     SKIP_NO_NUMBER,
     SKIP_OUT_OF_SCOPE,
     SKIP_CONTACT_TYPE_UNVERIFIED,
@@ -43,11 +61,6 @@ enum class EndedSuggestionDecision {
 
 object EndedSuggestionDecider {
     fun decide(input: EndedSuggestionInput): EndedSuggestionDecision {
-        if (!input.wasAnswered) return EndedSuggestionDecision.SKIP_NOT_ANSWERED
-        if (input.callDurationSeconds < FollowUpConstants.ENDED_SUGGESTION_MIN_CALL_SECONDS) {
-            return EndedSuggestionDecision.SKIP_TOO_SHORT
-        }
-
         val phone = input.phoneNumber.orEmpty().trim()
         if (!DialableNumber.isDialable(phone)) return EndedSuggestionDecision.SKIP_NO_NUMBER
 
@@ -68,15 +81,13 @@ object EndedSuggestionDecider {
         }
         if (!inScope) return EndedSuggestionDecision.SKIP_OUT_OF_SCOPE
 
-        if (withinWindow(input.lastSuggestedAtEpochMs, input.nowEpochMs, FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS)) {
+        // Don't ask about the same person twice in a row.
+        if (withinWindow(input.lastSuggestedAtEpochMs, input.nowEpochMs, input.sameNumberCooldownMillis)) {
             return EndedSuggestionDecision.SKIP_COOLDOWN
         }
-        if (withinWindow(
-                input.lastAnyNotificationAtEpochMs,
-                input.nowEpochMs,
-                FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS
-            )
-        ) {
+        // Don't let a burst of calls become a burst of notifications. Checked second so a repeat of
+        // the same number reports the reason the user would recognise.
+        if (withinWindow(input.lastAnyNotificationAtEpochMs, input.nowEpochMs, input.globalQuietMillis)) {
             return EndedSuggestionDecision.SKIP_QUIET_WINDOW
         }
 
@@ -84,13 +95,17 @@ object EndedSuggestionDecider {
     }
 
     /**
-     * Whether [lastAtEpochMs] falls inside the window ending now. Only a missing timestamp counts
-     * as "never happened" — a timestamp in the future (clock change, restored backup) is treated
-     * as still inside the window, so odd clock state can never *unblock* a repeat notification.
+     * Whether [lastAtEpochMs] falls inside the window ending now.
+     *
+     * A `null` [windowMillis] means the user switched this brake off, so nothing is ever inside it.
+     * Only a missing timestamp counts as "never happened" — a timestamp in the future (clock change,
+     * restored backup) is treated as still inside the window, so odd clock state can never
+     * *unblock* a repeat notification.
      */
-    private fun withinWindow(lastAtEpochMs: Long?, nowEpochMs: Long, windowMillis: Long): Boolean {
+    private fun withinWindow(lastAtEpochMs: Long?, nowEpochMs: Long, windowMillis: Long?): Boolean {
+        val window = windowMillis ?: return false
         val last = lastAtEpochMs ?: return false
         val elapsed = nowEpochMs - last
-        return elapsed < windowMillis
+        return elapsed < window
     }
 }

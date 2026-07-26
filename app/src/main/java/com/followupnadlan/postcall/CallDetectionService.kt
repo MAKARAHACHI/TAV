@@ -21,6 +21,7 @@ import com.followupnadlan.MainActivity
 import com.followupnadlan.R
 import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.EndedScopeSettings
+import com.followupnadlan.accessibility.FollowUpCooldownSettings
 import com.followupnadlan.missedcall.ContactVerifier
 import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
 import com.followupnadlan.notifications.EndedSuggestionNotificationHelper
@@ -36,9 +37,7 @@ class CallDetectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         diagnostics = CallDetectionDiagnostics(applicationContext)
-        val preferences = CallDetectionPreferences(applicationContext)
         monitor = CallStateMonitor(
-            minCallDurationSeconds = preferences.minCallDurationSeconds.toLong(),
             onCallEnded = {
                 postFollowUpNotificationAfterCallEnd()
             }
@@ -107,11 +106,10 @@ class CallDetectionService : Service() {
 
         val suggestionStore = EndedSuggestionStore(context)
         val contactVerifier = ContactVerifier(context)
+        // Every call qualifies: incoming or outgoing, answered or not. The decider owns the rules.
+        val cooldowns = FollowUpCooldownSettings(context)
         val decision = EndedSuggestionDecider.decide(
             EndedSuggestionInput(
-                // An outgoing call counts too — the call you returned is exactly the one that
-                // deserves a follow-up. What matters is that a conversation actually happened.
-                wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L,
                 callDurationSeconds = latestCall.durationSeconds,
                 phoneNumber = phone,
                 isSavedContact = contactVerifier.isSavedContact(phone),
@@ -120,6 +118,8 @@ class CallDetectionService : Service() {
                 allowedNumbers = AllowedRecipientsStore(context).load().map { it.number },
                 lastSuggestedAtEpochMs = suggestionStore.lastSuggestedAt(phone),
                 lastAnyNotificationAtEpochMs = suggestionStore.lastAnyNotificationAt(),
+                sameNumberCooldownMillis = cooldowns.sameNumberCooldownMillis,
+                globalQuietMillis = cooldowns.globalQuietMillis,
                 nowEpochMs = now
             )
         )
@@ -130,7 +130,12 @@ class CallDetectionService : Service() {
 
         // A name only when the number is genuinely saved; otherwise the number is the identity.
         val displayName = ContactNameResolver(context).resolveFirstName(phone).orEmpty()
-        EndedSuggestionNotificationHelper(context).showSuggestion(phone, displayName, message)
+        EndedSuggestionNotificationHelper(context).showSuggestion(
+            phone = phone,
+            displayName = displayName,
+            message = message,
+            wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L
+        )
         suggestionStore.markSuggested(phone, now)
     }
 

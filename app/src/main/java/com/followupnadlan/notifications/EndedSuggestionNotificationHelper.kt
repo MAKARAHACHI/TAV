@@ -24,13 +24,18 @@ import com.followupnadlan.postcall.EndedSendReceiver
  */
 class EndedSuggestionNotificationHelper(private val context: Context) {
 
-    fun showSuggestion(phone: String, displayName: String, message: String) {
+    /**
+     * [wasAnswered] only changes the wording. Calling "השיחה הסתיימה" after a call that never
+     * connected would describe a conversation that did not happen, and the user decides whether to
+     * send by reading this line.
+     */
+    fun showSuggestion(phone: String, displayName: String, message: String, wasAnswered: Boolean = true) {
         if (phone.isBlank() || message.isBlank()) return
         createChannel()
 
         // The number is the identity; a name appears only when it is genuinely saved.
         val who = displayName.ifBlank { phone }.trim()
-        val title = "$who · השיחה הסתיימה"
+        val title = if (wasAnswered) "$who · השיחה הסתיימה" else "$who · שיחה שלא נענתה"
 
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)

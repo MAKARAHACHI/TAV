@@ -178,6 +178,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
     val endedScopeSettings = remember(context) { EndedScopeSettings(appContext) }
     val endedCardSettings = remember(context) { EndedCardSettings(appContext) }
+    val cooldownSettings = remember(context) { FollowUpCooldownSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
@@ -590,6 +591,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label })
                         },
                         diagnosticsSnapshot = diagnosticsSnapshot,
+                        cooldownSettings = cooldownSettings,
                         onRequestPermissions = {
                             callDetectionPermissionLauncher.launch(
                                 arrayOf(
@@ -2747,6 +2749,7 @@ private fun SystemSettingsScreen(
     permissions: PermissionSnapshot,
     exclusionsPreview: RecipientPreview,
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot,
+    cooldownSettings: FollowUpCooldownSettings,
     onRequestPermissions: () -> Unit,
     onOpenExclusions: () -> Unit,
     onDeleteHistory: () -> Unit,
@@ -2754,6 +2757,8 @@ private fun SystemSettingsScreen(
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleted by remember { mutableStateOf(false) }
+    var sameNumberCooldown by remember { mutableStateOf(cooldownSettings.sameNumberCooldownMillis) }
+    var globalQuiet by remember { mutableStateOf(cooldownSettings.globalQuietMillis) }
 
     Column(
         modifier = Modifier
@@ -2846,6 +2851,61 @@ private fun SystemSettingsScreen(
                     lineHeight = 20.sp,
                     color = AccessibilityColors.TextBody
                 )
+            }
+        }
+
+        // Timing of the follow-up suggestion. This is upkeep rather than a journey decision — the
+        // journey decides *what* to send and to whom; this decides how often the app is allowed to
+        // ask. Both brakes can be switched off entirely: a user who wants a suggestion after every
+        // call is choosing more noise on purpose, and the suggestion is silent either way.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SettingsSectionTitle("תזמון ההצעות", bottomPadding = 4)
+
+                Text(
+                    "כל כמה זמן להציע שוב על אותו מספר",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccessibilityColors.TextStrong
+                )
+                FollowUpCooldownOptions.sameNumber.forEach { choice ->
+                    RadioRow(
+                        label = choice.label,
+                        selected = sameNumberCooldown == choice.millis,
+                        onClick = {
+                            sameNumberCooldown = choice.millis
+                            cooldownSettings.sameNumberCooldownMillis = choice.millis
+                        }
+                    )
+                }
+
+                Text(
+                    "מרווח מינימלי בין הצעות",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccessibilityColors.TextStrong,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                FollowUpCooldownOptions.globalQuiet.forEach { choice ->
+                    RadioRow(
+                        label = choice.label,
+                        selected = globalQuiet == choice.millis,
+                        onClick = {
+                            globalQuiet = choice.millis
+                            cooldownSettings.globalQuietMillis = choice.millis
+                        }
+                    )
+                }
+
+                if (sameNumberCooldown == null && globalQuiet == null) {
+                    Text(
+                        "כל שיחה תייצר הצעה — כולל טעויות חיוג ומוקדים.",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = AccessibilityColors.TextFaint,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         }
 
