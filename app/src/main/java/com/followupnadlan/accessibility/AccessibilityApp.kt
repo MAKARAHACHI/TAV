@@ -37,6 +37,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -76,6 +77,7 @@ import com.followupnadlan.postcall.CallDetectionServiceLifecycle
 import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
+import com.followupnadlan.profile.SignatureLine
 import com.followupnadlan.sharing.ContactCardShareResult
 import com.followupnadlan.sharing.PrepareAndShareContactCard
 import com.followupnadlan.templates.MessageComposition
@@ -170,6 +172,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val templateStore = remember(context) { TemplateStore(appContext) }
     val logStore = remember(context) { FollowUpLogStore(appContext) }
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
+    val endedScopeSettings = remember(context) { EndedScopeSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
@@ -189,6 +192,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var recipientPickerOpen by remember { mutableStateOf(false) }
     var askPickerOpen by remember { mutableStateOf(false) }
     var cardEditorOpen by remember { mutableStateOf(false) }
+    var channelPickerOpen by remember { mutableStateOf(false) }
+    var endedScopePickerOpen by remember { mutableStateOf(false) }
     // Bumped after the contact card is edited from the ended journey so the preview reloads.
     var profileRefresh by remember { mutableStateOf(0) }
     // Bumped whenever a recipient store is mutated, so Settings previews recompute.
@@ -202,7 +207,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         mutableStateOf(settings.whatsappMode == MissedCallWhatsAppMode.PREPARED_MANUAL)
     }
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
+    // The ended moment's own scope — a separate decision from missed (different jobs, §4).
+    var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
+    // The single explicit channel choice, read back from the engine's flag pair.
+    var selectedChannel by remember { mutableStateOf(FollowUpChannelSettings.current(settings)) }
     var smsFallback by remember { mutableStateOf(settings.smsFallbackEnabled) }
+    // The signature exactly as it will close every sent message; recomputed after a profile edit.
+    val signaturePreview = remember(profileRefresh) { SignatureLine.render(myDetailsStore.load()) }
     var preferredWhatsApp by remember {
         mutableStateOf(
             if (settings.preferredWhatsAppPackage == WhatsAppPackageResolver.WHATSAPP_BUSINESS_PACKAGE) {
@@ -500,13 +511,27 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             templates, TemplateRole.MISSED_CALL, selectedMissedId
                         )
                         MissedJourneyScreen(
-                            missedMessage = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            isEnabled = bridgingEnabled,
+                            missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            signature = signaturePreview,
                             recipientLabel = recipientScopeLabel(recipientScope),
                             askBeforeSend = askBeforeSend,
-                            channelLabel = "WhatsApp",
+                            channelLabel = channelLabel(selectedChannel),
+                            onToggleEnabled = {
+                                if (bridgingEnabled) {
+                                    settings.isEnabled = false
+                                    callDetectionPreferences.setEnabled(false)
+                                    bridgingEnabled = false
+                                    applyCallDetectionServiceState(appContext, bridgeEnabled = false, phoneStateGranted, callLogGranted)
+                                    diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
+                                } else {
+                                    modal = AccessibilityModal.SETUP
+                                }
+                            },
                             onEditMessage = { messageEditorTarget = TemplateRole.MISSED_CALL },
                             onEditRecipient = { recipientPickerOpen = true },
                             onEditAskBeforeSend = { askPickerOpen = true },
+                            onEditChannel = { channelPickerOpen = true },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -585,14 +610,61 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 if (recipientPickerOpen) {
                     JourneyOptionPickerDialog(
                         title = "מי יקבל את ההודעה?",
-                        options = RecipientScope.values().map { it to recipientScopeLabel(it) },
+                        options = RecipientScope.entries.map { it to recipientScopeLabel(it) },
                         selected = recipientScope,
                         onSelect = { scope ->
                             recipientScope = scope
                             recipientScopeSettings.scope = scope
                             recipientPickerOpen = false
+                            // "רק אנשים שאבחר" is meaningless until a list exists, so choosing it
+                            // goes straight to building that list rather than silently matching no one.
+                            if (scope == RecipientScope.ONLY_SELECTED) {
+                                modal = AccessibilityModal.ALLOWED_RECIPIENTS
+                            }
                         },
                         onDismiss = { recipientPickerOpen = false }
+                    )
+                }
+
+                // "באיזה ערוץ?" — WhatsApp Business is offered only when installed, and each
+                // choice is stored with fallback OFF, so the picked channel is the one used (§2).
+                if (channelPickerOpen) {
+                    JourneyOptionPickerDialog(
+                        title = "באיזה ערוץ?",
+                        options = FollowUpChannelSettings
+                            .available(whatsappAvailability.businessInstalled)
+                            .map { it to channelLabel(it) },
+                        selected = selectedChannel,
+                        onSelect = { channel ->
+                            selectedChannel = channel
+                            FollowUpChannelSettings.apply(settings, channel)
+                            smsFallback = settings.smsFallbackEnabled
+                            preferredWhatsApp = if (channel == FollowUpChannel.WHATSAPP_BUSINESS) {
+                                WhatsAppChoice.BUSINESS
+                            } else {
+                                WhatsAppChoice.REGULAR
+                            }
+                            channelPickerOpen = false
+                        },
+                        onDismiss = { channelPickerOpen = false }
+                    )
+                }
+
+                // "אחרי אילו שיחות להציע לשלוח?" — the ended moment's own scope, stored separately.
+                if (endedScopePickerOpen) {
+                    JourneyOptionPickerDialog(
+                        title = "אחרי אילו שיחות להציע לשלוח?",
+                        options = RecipientScope.entries.map { it to endedScopeLabel(it) },
+                        selected = endedScope,
+                        onSelect = { scope ->
+                            endedScope = scope
+                            endedScopeSettings.scope = scope
+                            endedScopePickerOpen = false
+                            if (scope == RecipientScope.ONLY_SELECTED) {
+                                modal = AccessibilityModal.ALLOWED_RECIPIENTS
+                            }
+                        },
+                        onDismiss = { endedScopePickerOpen = false }
                     )
                 }
 
@@ -811,13 +883,17 @@ private fun <T> JourneyOptionPickerDialog(
 // values are read from the existing stores; the chevrons don't open pickers until the wiring pass.
 @Composable
 private fun MissedJourneyScreen(
-    missedMessage: String,
+    isEnabled: Boolean,
+    missedBody: String,
+    signature: String,
     recipientLabel: String,
     askBeforeSend: Boolean,
     channelLabel: String,
+    onToggleEnabled: () -> Unit,
     onEditMessage: () -> Unit,
     onEditRecipient: () -> Unit,
     onEditAskBeforeSend: () -> Unit,
+    onEditChannel: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -828,46 +904,130 @@ private fun MissedJourneyScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         ModalHeader(title = "אם לא עניתי", onBack = onBack)
-        Text(
-            text = "בפעם הבאה שלא תוכל לענות, הלקוח יקבל ממך הודעה.",
-            fontWeight = FontWeight.Medium,
-            fontSize = 15.sp,
-            lineHeight = 23.sp,
-            color = AccessibilityColors.TextBody,
-            modifier = Modifier.fillMaxWidth()
+
+        // 1 — isEnabled exists in the engine, so it must be visible (§2). Off means clients who
+        // don't reach you get nothing; hiding that would be the exact false belief §2 forbids.
+        JourneySwitchRow(
+            label = "פועל",
+            checked = isEnabled,
+            onToggle = onToggleEnabled
         )
 
-        // 3 — the message the client receives.
+        // 2 — the message itself, dimmed when off so the screen shows what is actually happening.
         JourneySectionLabel("ההודעה")
-        WhatsAppMessagePreview(message = missedMessage, maxLines = 8)
-        OutlinePillButton(
-            text = "שנה את ההודעה",
-            onClick = onEditMessage,
-            borderColor = AccessibilityColors.Primary,
-            contentColor = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.Edit
+        MessageWithSignaturePreview(
+            body = missedBody,
+            signature = signature,
+            dimmed = !isEnabled,
+            onEditBody = onEditMessage
         )
+        if (!isEnabled) {
+            JourneyQuietLine("לקוחות שלא נענו לא יקבלו הודעה.")
+        }
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // 4 — who receives it (result, not "recipient scope"). Wired: opens the scope picker.
+        // 3 — who receives it (result, not "recipient scope").
         JourneyResultRow(title = "מי יקבל את ההודעה?", value = recipientLabel, onClick = onEditRecipient)
-        // 5 — the confirm-before-send decision, phrased as a result. Wired: opens the picker.
+        // 4 — the confirm-before-send decision, phrased as a result.
         JourneyResultRow(
             title = "האם לאשר לפני שליחה?",
             value = if (askBeforeSend) "כן, אאשר כל הודעה" else "לא, תישלח גם בלי אישורי",
             onClick = onEditAskBeforeSend
         )
-        // 6 — how the client receives it. Left display-only ("WhatsApp"): the engine has no
-        // "send exactly this channel, never fall back" state, so exposing a channel picker would
-        // let the user pick WhatsApp while SMS still sends behind their back (§2 false belief).
-        // Wiring the picker needs a new engine channel state — out of scope for this pass.
-        JourneyResultRow(title = "איך הלקוח יקבל אותה?", value = channelLabel)
+        // 5 — the channel, now an explicit choice. See FollowUpChannelSettings: each option
+        // stores a flag pair with fallback OFF, so the chosen channel is the channel used.
+        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // 7 — cooldown, stated quietly. No picker.
+        // 6 — cooldown, stated quietly. No picker (⚪ — not a decision the user should carry).
         JourneyQuietLine("לא נשלח שוב לאותו אדם במשך יממה.")
+    }
+}
+
+/**
+ * The message exactly as the client will receive it: an editable body plus the signature line,
+ * always visible and always locked.
+ *
+ * Locked-but-visible is deliberate (§2): the signature is part of what the client gets, so hiding
+ * it during editing would show the user less than the truth. It is not editable here because it is
+ * identity, not wording — it is changed by editing the profile, in one place.
+ */
+@Composable
+private fun MessageWithSignaturePreview(
+    body: String,
+    signature: String,
+    dimmed: Boolean,
+    onEditBody: () -> Unit
+) {
+    val alpha = if (dimmed) 0.45f else 1f
+    Surface(
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+        color = Color(0xFFE4F8D8).copy(alpha = alpha),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8).copy(alpha = alpha)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text(
+                text = body.ifBlank { " " },
+                color = AccessibilityColors.TextStrong.copy(alpha = alpha),
+                fontSize = 18.sp,
+                lineHeight = 29.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onEditBody)
+            )
+            if (signature.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = signature,
+                        color = AccessibilityColors.TextMuted.copy(alpha = alpha),
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        AccessibilityIcons.Lock,
+                        contentDescription = "שורת החתימה נקבעת מהפרטים שלך",
+                        tint = AccessibilityColors.TextFaint.copy(alpha = alpha),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A journey row carrying a real on/off switch — used for the missed journey's "פועל". */
+@Composable
+private fun JourneySwitchRow(
+    label: String,
+    checked: Boolean,
+    onToggle: () -> Unit
+) {
+    AppCard(cornerRadius = 18) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                color = AccessibilityColors.TextStrong
+            )
+            Switch(checked = checked, onCheckedChange = { onToggle() })
+        }
     }
 }
 
@@ -2732,12 +2892,31 @@ private fun NavigationRowContent(label: String, leadingIcon: ImageVector, leadin
     }
 }
 
+// Result-language, in the user's voice — these are answers to "מי יקבל את ההודעה?", so they
+// read as outcomes ("רק מי שלא שמור אצלי"), never as a mechanism name ("NON_CONTACTS_ONLY").
 private fun recipientScopeLabel(scope: RecipientScope): String =
     when (scope) {
-        RecipientScope.ANY_NUMBER -> "כל מספר"
-        RecipientScope.CONTACTS_ONLY -> "אנשי קשר בלבד"
-        RecipientScope.NON_CONTACTS_ONLY -> "מספרים לא שמורים"
-        RecipientScope.ONLY_SELECTED -> "רק למי שבחרתי"
+        RecipientScope.ANY_NUMBER -> "לכל מי שמתקשר"
+        RecipientScope.CONTACTS_ONLY -> "רק אנשי הקשר שלי"
+        RecipientScope.NON_CONTACTS_ONLY -> "רק מי שלא שמור אצלי"
+        RecipientScope.ONLY_SELECTED -> "רק אנשים שאבחר"
+    }
+
+/** The same four choices phrased for the ended moment, which offers rather than sends. */
+private fun endedScopeLabel(scope: RecipientScope): String =
+    when (scope) {
+        RecipientScope.ANY_NUMBER -> "אחרי כל שיחה"
+        RecipientScope.CONTACTS_ONLY -> "רק אנשי הקשר שלי"
+        RecipientScope.NON_CONTACTS_ONLY -> "רק מי שלא שמור אצלי"
+        RecipientScope.ONLY_SELECTED -> "רק אנשים שאבחר"
+    }
+
+/** The delivery channel, named as the client experiences it. */
+private fun channelLabel(channel: FollowUpChannel): String =
+    when (channel) {
+        FollowUpChannel.WHATSAPP -> "WhatsApp"
+        FollowUpChannel.WHATSAPP_BUSINESS -> "WhatsApp Business"
+        FollowUpChannel.SMS -> "SMS"
     }
 
 private fun blockedGroupLabel(group: BlockedRecipientGroup): String =
