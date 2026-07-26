@@ -102,7 +102,9 @@ internal enum class AccessibilityModal {
     MISSED_CALL_PROMPT,
     // Design Pass 2/3 — the two trust-moment journey pages, opened from the home cards.
     MISSED_JOURNEY,
-    ENDED_JOURNEY
+    ENDED_JOURNEY,
+    // System maintenance, reached only from the small ⚙️ on Home — never from navigation.
+    SYSTEM_SETTINGS
 }
 
 /** Candidate source for the multi-picker overlay. */
@@ -333,26 +335,39 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             autoSendConsentGranted = whatsAppAutoSendController.isAccessibilityServiceEnabled(),
                             hasTemplate = templates.isNotEmpty()
                         )
+                        val missedTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.MISSED_CALL, selectedMissedId
+                        )
+                        val endedTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.CALL_ENDED, selectedEndedId
+                        )
+                        val homeWarning = HomeWarningLogic.warningFor(
+                            HomeWarningState(
+                                serviceEnabled = bridgingEnabled && callDetectionPreferences.isEnabled(),
+                                phoneStatePermissionGranted = phoneStateGranted,
+                                callLogPermissionGranted = callLogGranted,
+                                profileEmpty = signaturePreview.isBlank()
+                            )
+                        )
                         HomeScreen(
-                            agentName = myDetailsStore.load().agentName,
-                            bridgingEnabled = bridgingEnabled,
-                            bridgeReady = bridgingEnabled &&
-                                phoneStateGranted &&
-                                callLogGranted &&
-                                callDetectionPreferences.isEnabled(),
+                            warning = homeWarning,
+                            missedEnabled = bridgingEnabled,
+                            missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            endedBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            signature = signaturePreview,
+                            cardAttached = cardAttached,
                             onOpenMissedJourney = { modal = AccessibilityModal.MISSED_JOURNEY },
                             onOpenEndedJourney = { modal = AccessibilityModal.ENDED_JOURNEY },
-                            onToggleBridging = {
-                                if (bridgingEnabled) {
-                                    settings.isEnabled = false
-                                    callDetectionPreferences.setEnabled(false)
-                                    bridgingEnabled = false
-                                    applyCallDetectionServiceState(appContext, bridgeEnabled = false, phoneStateGranted, callLogGranted)
-                                    diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
+                            // The ⚠️ leads to whichever fix it is about: an empty profile opens the
+                            // card editor, anything else opens the enable/permissions flow.
+                            onResolveWarning = {
+                                if (homeWarning == HomeWarning.EMPTY_PROFILE) {
+                                    cardEditorOpen = true
                                 } else {
                                     modal = AccessibilityModal.SETUP
                                 }
-                            }
+                            },
+                            onOpenSystemSettings = { modal = AccessibilityModal.SYSTEM_SETTINGS }
                         )
                         }
                         AccessibilityTab.ACTIVITY -> ActivityScreen(logStore = logStore)
@@ -562,6 +577,51 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
+
+                    // Filled in by the system-settings stage; routed here so the ⚙️ is live.
+                    AccessibilityModal.SYSTEM_SETTINGS -> SettingsScreen(
+                        askBeforeSend = askBeforeSend,
+                        recipientScope = recipientScope,
+                        preferredWhatsApp = preferredWhatsApp,
+                        showWhatsAppChoice = whatsappAvailability.businessInstalled,
+                        smsFallback = smsFallback,
+                        allowedPreview = RecipientPreviewLogic.summary(allowedRecipientsStore.load().map { it.label }),
+                        exclusionsPreview = RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label }),
+                        onSelectAskBeforeSend = { ask ->
+                            askBeforeSend = ask
+                            settings.whatsappMode = if (ask) {
+                                MissedCallWhatsAppMode.PREPARED_MANUAL
+                            } else {
+                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
+                            }
+                        },
+                        onSelectRecipientScope = { scope ->
+                            recipientScope = scope
+                            recipientScopeSettings.scope = scope
+                        },
+                        onSelectWhatsApp = { choice ->
+                            preferredWhatsApp = choice
+                            settings.preferredWhatsAppPackage = when (choice) {
+                                WhatsAppChoice.BUSINESS -> WhatsAppPackageResolver.WHATSAPP_BUSINESS_PACKAGE
+                                WhatsAppChoice.REGULAR -> WhatsAppPackageResolver.WHATSAPP_MESSENGER_PACKAGE
+                            }
+                        },
+                        onToggleSmsFallback = {
+                            val next = !smsFallback
+                            if (next && context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+                                smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                            } else {
+                                settings.smsFallbackEnabled = next
+                                smsFallback = next
+                            }
+                        },
+                        onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
+                        onOpenAllowedRecipients = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
+                        onOpenTemplates = { modal = AccessibilityModal.TEMPLATES },
+                        onDeleteHistory = { logStore.clear() },
+                        myDetailsStore = myDetailsStore,
+                        diagnosticsSnapshot = diagnosticsSnapshot
+                    )
 
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
@@ -1197,15 +1257,17 @@ private fun EndedMessagePreview(
 // are being sent (§2).
 @Composable
 private fun HomeScreen(
-    agentName: String,
-    bridgingEnabled: Boolean,
-    bridgeReady: Boolean,
+    warning: HomeWarning?,
+    missedEnabled: Boolean,
+    missedBody: String,
+    endedBody: String,
+    signature: String,
+    cardAttached: Boolean,
     onOpenMissedJourney: () -> Unit,
     onOpenEndedJourney: () -> Unit,
-    onToggleBridging: () -> Unit
+    onResolveWarning: () -> Unit,
+    onOpenSystemSettings: () -> Unit
 ) {
-    val greeting = if (agentName.isBlank()) "שלום 👋" else "שלום $agentName 👋"
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1213,123 +1275,160 @@ private fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = greeting,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 26.sp,
-            color = AccessibilityColors.Heading,
-            modifier = Modifier.fillMaxWidth()
-        )
-        // The promise, not a feature: "מענה" echoes forward into the first card.
-        Text(
-            text = "כדי שכל לקוח יקבל מענה, גם כשלא יכולת לענות.",
-            fontWeight = FontWeight.Medium,
-            fontSize = 15.sp,
-            color = AccessibilityColors.TextBody,
-            modifier = Modifier.fillMaxWidth()
-        )
+        // The ⚙️ is present but not part of navigation — 95% of the time nobody needs it.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Icon(
+                AccessibilityIcons.Settings,
+                contentDescription = "הגדרות מערכת",
+                tint = AccessibilityColors.TextFaint,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clickable(onClick = onOpenSystemSettings)
+            )
+        }
 
+        // Shown only when something is actually broken; otherwise Home stays silent.
+        warning?.let {
+            HomeWarningRow(text = HomeWarningLogic.message(it), onClick = onResolveWarning)
+        }
+
+        // Home is a mirror: each card shows the real message, not a sentence about it.
         HomeMomentCard(
             emoji = "📞",
             title = "אם לא עניתי",
-            whyLines = "הלקוח יקבל ממך הודעה,\nכדי שלא יישאר בלי מענה.",
-            onEdit = onOpenMissedJourney
+            body = missedBody,
+            signature = signature,
+            dimmed = !missedEnabled,
+            footnote = if (missedEnabled) null else "לקוחות שלא נענו לא יקבלו הודעה",
+            onOpen = onOpenMissedJourney
         )
 
         HomeMomentCard(
             emoji = "🤝",
             title = "אחרי שדיברנו",
-            whyLines = "שלח תזכורת וכרטיס ביקור,\nכדי שיזכור אותך גם בעוד יומיים.",
-            onEdit = onOpenEndedJourney
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // §2 quiet line — one row, not a status block. When bridging is off, the missed-call
-        // card's "קורה אוטומטית" promise is not actually kept; this line lets the user turn it on.
-        HomeBridgingLine(
-            bridgingEnabled = bridgingEnabled,
-            bridgeReady = bridgeReady,
-            onToggleBridging = onToggleBridging
+            body = endedBody,
+            signature = if (cardAttached) signature else "",
+            dimmed = false,
+            footnote = null,
+            onOpen = onOpenEndedJourney
         )
     }
 }
 
-/**
- * A giant home moment card: emoji + moment-title on one line with the state label trailing, the
- * "why" sublines below, and an [ערוך] affordance. The whole card is tappable → journey page.
- */
+/** The ⚠️ line: what the client is experiencing, and the way to fix it. */
 @Composable
-private fun HomeMomentCard(
-    emoji: String,
-    title: String,
-    whyLines: String,
-    onEdit: () -> Unit
-) {
-    AppCard(cornerRadius = 22, modifier = Modifier.clickable(onClick = onEdit)) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(text = emoji, fontSize = 26.sp)
-                Text(
-                    text = title,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 20.sp,
-                    color = AccessibilityColors.Heading
-                )
-            }
+private fun HomeWarningRow(text: String, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = AccessibilityColors.Warning.copy(alpha = 0.12f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "⚠️", fontSize = 16.sp)
             Text(
-                text = whyLines,
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
-                color = AccessibilityColors.TextBody,
-                modifier = Modifier.fillMaxWidth()
+                text = text,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp,
+                lineHeight = 21.sp,
+                color = AccessibilityColors.TextStrong,
+                modifier = Modifier.weight(1f)
             )
-            OutlinePillButton(
-                text = "ערוך",
-                onClick = onEdit,
-                borderColor = AccessibilityColors.Primary,
-                contentColor = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.Edit
+            Icon(
+                AccessibilityIcons.ChevronStart,
+                contentDescription = null,
+                tint = AccessibilityColors.TextMuted,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
 }
 
-/** The single quiet §2 line at the bottom of Home: turn the missed-call bridge on/off. */
+/**
+ * A home moment card: the moment's name, and beneath it the actual message a client receives.
+ *
+ * Deliberately carries no explanatory subtitle, no state label and no counters — the message is
+ * the thing itself, and a sentence describing it would only compete with it. Tapping zooms into
+ * the same artifact, larger and editable.
+ */
 @Composable
-private fun HomeBridgingLine(
-    bridgingEnabled: Boolean,
-    bridgeReady: Boolean,
-    onToggleBridging: () -> Unit
+private fun HomeMomentCard(
+    emoji: String,
+    title: String,
+    body: String,
+    signature: String,
+    dimmed: Boolean,
+    footnote: String?,
+    onOpen: () -> Unit
 ) {
-    if (bridgingEnabled) {
-        PillButton(
-            text = if (bridgeReady) "גישור לשיחות פעיל" else "השלם הרשאות",
-            onClick = onToggleBridging,
-            background = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning,
-            leadingIcon = AccessibilityIcons.PhoneInTalk
-        )
-        CaptionWithIcon(
-            text = if (bridgeReady) "מוכן לשיחות שלא נענו" else "חסרה הרשאה לזיהוי שיחות",
-            icon = if (bridgeReady) AccessibilityIcons.CheckCircle else AccessibilityIcons.Block,
-            color = if (bridgeReady) AccessibilityColors.Green else AccessibilityColors.Warning
-        )
-    } else {
-        PillButton(
-            text = "הפעל גישור לשיחות",
-            onClick = onToggleBridging,
-            background = AccessibilityColors.Primary,
-            leadingIcon = AccessibilityIcons.PhoneInTalk
-        )
-        CaptionWithIcon(
-            text = "כבוי — לא יישלחו הודעות אוטומטיות",
-            icon = AccessibilityIcons.Block,
-            color = AccessibilityColors.TextMuted
-        )
+    val alpha = if (dimmed) 0.45f else 1f
+    AppCard(cornerRadius = 22, modifier = Modifier.clickable(onClick = onOpen)) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = emoji, fontSize = 22.sp)
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 19.sp,
+                    color = AccessibilityColors.Heading,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    AccessibilityIcons.ChevronStart,
+                    contentDescription = null,
+                    tint = AccessibilityColors.TextFaint,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
+                color = Color(0xFFE4F8D8).copy(alpha = alpha),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC9EAB8).copy(alpha = alpha)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Text(
+                        text = body.ifBlank { " " },
+                        color = AccessibilityColors.TextStrong.copy(alpha = alpha),
+                        fontSize = 15.sp,
+                        lineHeight = 23.sp,
+                        maxLines = 4
+                    )
+                    if (signature.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = signature,
+                            color = AccessibilityColors.TextMuted.copy(alpha = alpha),
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            footnote?.let {
+                Text(
+                    text = it,
+                    fontSize = 13.sp,
+                    color = AccessibilityColors.TextMuted,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
     }
 }
 
