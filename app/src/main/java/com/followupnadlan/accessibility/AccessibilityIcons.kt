@@ -424,4 +424,83 @@ object AccessibilityIcons {
             lineTo(15f, 19f); lineTo(8f, 12f); close()
         }
     }
+
+    val ChevronForward: ImageVector = icon("chevron_forward") {
+        solid {
+            moveTo(9f, 5f); lineTo(7.6f, 6.4f); lineTo(13.2f, 12f); lineTo(7.6f, 17.6f)
+            lineTo(9f, 19f); lineTo(16f, 12f); close()
+        }
+    }
+
+    val Search: ImageVector = icon("search") {
+        solid {
+            moveTo(11f, 3f); curveTo(15.4f, 3f, 19f, 6.6f, 19f, 11f)
+            curveTo(19f, 12.8f, 18.4f, 14.5f, 17.4f, 15.9f)
+            lineTo(21.7f, 20.2f); lineTo(20.2f, 21.7f); lineTo(15.9f, 17.4f)
+            curveTo(14.5f, 18.4f, 12.8f, 19f, 11f, 19f)
+            curveTo(6.6f, 19f, 3f, 15.4f, 3f, 11f); curveTo(3f, 6.6f, 6.6f, 3f, 11f, 3f); close()
+        }
+        path(fill = SolidColor(Color.White)) {
+            moveTo(11f, 5.5f); curveTo(14f, 5.5f, 16.5f, 8f, 16.5f, 11f)
+            curveTo(16.5f, 14f, 14f, 16.5f, 11f, 16.5f)
+            curveTo(8f, 16.5f, 5.5f, 14f, 5.5f, 11f); curveTo(5.5f, 8f, 8f, 5.5f, 11f, 5.5f); close()
+        }
+    }
+
+    val WhatsApp: ImageVector = icon("whatsapp") {
+        solid {
+            moveTo(12f, 2f)
+            curveTo(6.5f, 2f, 2f, 6.5f, 2f, 12f)
+            curveTo(2f, 13.8f, 2.5f, 15.5f, 3.3f, 17f)
+            lineTo(2f, 22f); lineTo(7.2f, 20.7f)
+            curveTo(8.6f, 21.5f, 10.3f, 22f, 12f, 22f)
+            curveTo(17.5f, 22f, 22f, 17.5f, 22f, 12f)
+            curveTo(22f, 6.5f, 17.5f, 2f, 12f, 2f); close()
+        }
+        path(fill = SolidColor(Color.White)) {
+            moveTo(8.4f, 7.2f)
+            curveTo(8.6f, 7.2f, 8.8f, 7.2f, 9f, 7.2f)
+            curveTo(9.2f, 7.2f, 9.4f, 7.2f, 9.6f, 7.7f)
+            curveTo(9.8f, 8.2f, 10.2f, 9.3f, 10.3f, 9.4f)
+            curveTo(10.4f, 9.6f, 10.4f, 9.7f, 10.3f, 9.9f)
+            curveTo(10.2f, 10.1f, 10.1f, 10.2f, 10f, 10.4f)
+            curveTo(9.9f, 10.5f, 9.7f, 10.7f, 9.9f, 11f)
+            curveTo(10.1f, 11.3f, 10.7f, 12.3f, 11.6f, 13.1f)
+            curveTo(12.7f, 14.1f, 13.6f, 14.4f, 13.9f, 14.5f)
+            curveTo(14.2f, 14.7f, 14.4f, 14.6f, 14.6f, 14.4f)
+            curveTo(14.8f, 14.2f, 15.2f, 13.7f, 15.4f, 13.4f)
+            curveTo(15.6f, 13.2f, 15.8f, 13.2f, 16f, 13.3f)
+            curveTo(16.2f, 13.4f, 17.3f, 13.9f, 17.5f, 14f)
+            curveTo(17.7f, 14.1f, 17.9f, 14.2f, 17.9f, 14.4f)
+            curveTo(18f, 14.6f, 18f, 15.5f, 17.6f, 16f)
+            curveTo(17.2f, 16.5f, 16.4f, 17f, 15.9f, 17f)
+            curveTo(15.5f, 17.1f, 15f, 17.1f, 12.9f, 16.3f)
+            curveTo(10.4f, 15.3f, 8.8f, 12.8f, 8.6f, 12.5f)
+            curveTo(8.5f, 12.3f, 7.5f, 11f, 7.5f, 9.6f)
+            curveTo(7.5f, 8.2f, 8.2f, 7.5f, 8.4f, 7.2f); close()
+        }
+    }
+
+    val Battery: ImageVector = icon("battery") {
+        solid {
+            moveTo(10.3f, 1.9f); horizontalLineTo(13.7f)
+            curveTo(14.3f, 1.9f, 14.7f, 2.4f, 14.7f, 3f)
+            verticalLineTo(4.5f); horizontalLineTo(9.3f); verticalLineTo(3f)
+            curveTo(9.3f, 2.4f, 9.7f, 1.9f, 10.3f, 1.9f); close()
+        }
+        solid {
+            moveTo(4f, 6f); horizontalLineTo(20f); verticalLineTo(22f); horizontalLineTo(4f); close()
+        }
+        path(fill = SolidColor(Color.White)) {
+            moveTo(11f, 9f); horizontalLineTo(13f); verticalLineTo(13f); horizontalLineTo(11f); close()
+            moveTo(11f, 15.5f); horizontalLineTo(13f); verticalLineTo(17.5f); horizontalLineTo(11f); close()
+        }
+    }
+
+    val ExpandMore: ImageVector = icon("expand_more") {
+        solid {
+            moveTo(12f, 15.4f); lineTo(5.6f, 9f); lineTo(7f, 7.6f); lineTo(12f, 12.6f)
+            lineTo(17f, 7.6f); lineTo(18.4f, 9f); close()
+        }
+    }
 }

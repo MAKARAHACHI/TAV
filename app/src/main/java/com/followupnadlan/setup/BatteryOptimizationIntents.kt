@@ -20,4 +20,22 @@ object BatteryOptimizationIntents {
     } catch (_: RuntimeException) {
         null
     }
+
+    /**
+     * Direct "exempt this app" prompt (skips the settings list). Falls back to
+     * [appSettingsIntent] on OEMs that don't resolve it (some MIUI/EMUI builds).
+     */
+    @Suppress("BatteryLife")
+    fun requestIgnoreOptimizationsIntent(context: Context): Intent? = try {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+        if (intent.resolveActivity(context.packageManager) == null) {
+            appSettingsIntent(context)
+        } else {
+            intent
+        }
+    } catch (_: RuntimeException) {
+        appSettingsIntent(context)
+    }
 }
