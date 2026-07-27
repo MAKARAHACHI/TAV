@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FollowUp - Premium App UI</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* =========================================
+           Design Tokens
+           ========================================= */
+        :root {
+            --ink: #111b21; /* צבע כהה יותר, קרוב לטקסט בוואטסאפ */
+            --ink-light: #667781;
+            --primary: #3f8cff;
+            --primary-light: rgba(63, 140, 255, 0.1);
+            --accent: #17b3a3;
+            --bubble-green: #e1f7cb; /* ירוק וואטסאפ מדויק */
+            --chat-bg: #efeae2; /* רקע שיחה */
+            --bg-color: #f7f9fa;
+            --surface: #ffffff;
+            
+            --radius-main: 24px;
+            --radius-bubble: 18px 18px 4px 18px; /* זנב הבועה */
+            
+            --shadow-float: 0 12px 30px rgba(0,0,0,0.06);
+            --shadow-card: 0 4px 15px rgba(0,0,0,0.03);
+            --transition: 0.3s ease;
+        }
+
+        /* =========================================
+           Reset & Container
+           ========================================= */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Heebo', sans-serif;
+            background-color: #d1d7db; /* רקע שולחן עבודה */
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; color: var(--ink);
+            padding: 20px;
+        }
+
+        /* מוקאפ הטלפון */
+        .app-device {
+            width: 100%; max-width: 414px; height: 896px; max-height: 90vh;
+            background-color: var(--bg-color);
+            border-radius: 44px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.15), inset 0 0 0 12px #000;
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            position: relative;
+        }
+        
+        /* אי המצלמה (Dynamic Island / Notch) */
+        .app-device::before {
+            content: ''; position: absolute;
+            top: 12px; left: 50%; transform: translateX(-50%);
+            width: 120px; height: 28px;
+            background: #000; border-radius: 20px; z-index: 100;
+        }
+
+        .scroll-area {
+            flex: 1; overflow-y: auto; overflow-x: hidden;
+            padding: 60px 24px 40px; /* מקום לנוטץ' למעלה */
+        }
+        .scroll-area::-webkit-scrollbar { display: none; }
+
+        /* =========================================
+           Header & Status
+           ========================================= */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+        .greeting h1 { font-size: 1.6rem; font-weight: 800; color: var(--ink); letter-spacing: -0.5px;}
+        .greeting p { font-size: 0.95rem; color: var(--ink-light); font-weight: 500;}
+        
+        .icon-btn {
+            background: #fff; border: 1px solid #eaeaea;
+            width: 44px; height: 44px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem; cursor: pointer; box-shadow: var(--shadow-card);
+        }
+
+        /* Master Toggle Card (Premium look) */
+        .master-card {
+            background: linear-gradient(135deg, var(--ink) 0%, #2a3a30 100%);
+            border-radius: var(--radius-main);
+            padding: 24px; color: #fff; margin-bottom: 24px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: var(--shadow-float);
+        }
+        .master-text h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 4px; }
+        .master-text p { font-size: 0.9rem; color: var(--accent); font-weight: 500; }
+
+        /* Modern Toggle */
+        .toggle-switch { position: relative; width: 64px; height: 36px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(255,255,255,0.2); transition: .4s; border-radius: 36px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 28px; width: 28px; left: 4px; bottom: 4px;
+            background-color: white; transition: .4s cubic-bezier(0.68, -0.55, 0.265, 1.55); border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(28px); }
+
+        /* Stats */
+        .stats-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 36px;
+        }
+        .stat-box {
+            background: var(--surface); padding: 18px; border-radius: 20px;
+            box-shadow: var(--shadow-card);
+        }
+        .stat-box h3 { font-size: 1.8rem; font-weight: 800; color: var(--primary); margin-bottom: 2px;}
+        .stat-box p { font-size: 0.85rem; color: var(--ink-light); font-weight: 500;}
+
+        /* =========================================
+           Message Config Cards (The WhatsApp View)
+           ========================================= */
+        .section-title { font-size: 1.15rem; font-weight: 800; margin-bottom: 16px; color: var(--ink); }
+
+        .config-card {
+            background: var(--surface); border-radius: var(--radius-main);
+            overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 24px;
+            border: 1px solid rgba(0,0,0,0.04); transition: var(--transition);
+        }
+        .config-card:focus-within, .config-card:hover {
+            box-shadow: var(--shadow-float); border-color: var(--primary-light);
+        }
+
+        .config-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 20px; border-bottom: 1px solid #f0f0f0;
+        }
+        .config-title { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.05rem; }
+        .config-icon { font-size: 1.2rem; }
+        .edit-btn {
+            background: var(--primary-light); color: var(--primary);
+            padding: 6px 14px; border-radius: 12px; font-weight: 700; font-size: 0.85rem;
+            text-decoration: none; border: none; cursor: pointer;
+        }
+
+        /* The Realistic Chat Preview */
+        .chat-preview-zone {
+            background-color: var(--chat-bg);
+            /* תבנית עדינה לרקע כדי שייראה כמו שיחה */
+            background-image: url('data:image/svg+xml;utf8,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="2" cy="2" r="1" fill="rgba(0,0,0,0.05)"/></svg>');
+            padding: 24px 20px;
+            display: flex; flex-direction: column; align-items: flex-start; /* rtl: msg is on the left */
+        }
+
+        .whatsapp-bubble {
+            background: var(--bubble-green);
+            padding: 10px 14px 22px 14px; /* מקום למטה לשעה */
+            border-radius: var(--radius-bubble);
+            font-size: 0.95rem; line-height: 1.4; color: var(--ink);
+            position: relative; max-width: 90%;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+        }
+        
+        /* זנב הבועה */
+        .whatsapp-bubble::before {
+            content: ''; position: absolute; bottom: 0; right: -8px;
+            width: 20px; height: 20px;
+            background: radial-gradient(circle at top right, transparent 50%, var(--bubble-green) 50%);
+            clip-path: polygon(0 100%, 100% 100%, 0 0);
+        }
+
+        .bubble-meta {
+            position: absolute; bottom: 4px; left: 10px;
+            display: flex; align-items: center; gap: 4px;
+            font-size: 0.65rem; color: #667781;
+        }
+        .blue-ticks { color: #53bdeb; font-size: 0.75rem; letter-spacing: -2px;}
+
+        /* VCard Element inside Chat */
+        .vcard-attachment {
+            background: #fff; margin-top: 10px; padding: 10px;
+            border-radius: 12px; display: flex; align-items: center; gap: 12px;
+            border: 1px solid rgba(0,0,0,0.05); width: 100%;
+        }
+        .vcard-avatar {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: linear-gradient(135deg, #17b3a3, #128c7e);
+            color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700;
+        }
+        .vcard-details strong { display: block; font-size: 0.95rem; margin-bottom: 2px;}
+        .vcard-details span { font-size: 0.8rem; color: var(--ink-light); }
+        .vcard-action { margin-right: auto; color: #128c7e; }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-device">
+        <div class="scroll-area">
+            
+            <!-- Header -->
+            <header class="header">
+                <div class="greeting">
+                    <h1>שלום, דני 👋</h1>
+                    <p>מערכת הפולואפ פעילה</p>
+                </div>
+                <button class="icon-btn">⚙️</button>
+            </header>
+
+            <!-- Master Switch -->
+            <div class="master-card">
+                <div class="master-text">
+                    <h2>מצב אוטומטי</h2>
+                    <p>האפליקציה עובדת ברקע</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <h3>4</h3>
+                    <p>לקוחות ניצלו היום</p>
+                </div>
+                <div class="stat-box">
+                    <h3>12</h3>
+                    <p>הודעות נשלחו השבוע</p>
+                </div>
+            </div>
+
+            <h2 class="section-title">ההודעות שלך</h2>
+
+            <!-- Card 1: Missed Call -->
+            <div class="config-card">
+                <div class="config-header">
+                    <div class="config-title">
+                        <span class="config-icon">📞</span>
+                        אם לא עניתי
+                    </div>
+                    <button class="edit-btn">עריכה</button>
+                </div>
+                
+                <!-- תצוגת צ'אט מציאותית -->
+                <div class="chat-preview-zone">
+                    <div class="whatsapp-bubble">
+                        תודה שהתקשרת, אני כרגע לא פנוי. אחזור אליך ברגע שאתפנה.
+                        <br><br><strong>דני לוי · עו"ד מקרקעין</strong>
+                        
+                        <div class="bubble-meta">
+                            10:42 <span class="blue-ticks">✓✓</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 2: After Call -->
+            <div class="config-card">
+                <div class="config-header">
+                    <div class="config-title">
+                        <span class="config-icon">🤝</span>
+                        אחרי שדיברנו
+                    </div>
+                    <button class="edit-btn">עריכה</button>
+                </div>
+                
+                <!-- תצוגת צ'אט מציאותית עם איש קשר -->
+                <div class="chat-preview-zone">
+                    <div class="whatsapp-bubble">
+                        תודה על השיחה! שמח שדיברנו. מצרף את הפרטים שלי כדי שיהיה לך:
+                        
+                        <div class="vcard-attachment">
+                            <div class="vcard-avatar">דל</div>
+                            <div class="vcard-details">
+                                <strong>דני לוי - משרד עורכי דין</strong>
+                                <span>איש קשר (.vcf)</span>
+                            </div>
+                            <div class="vcard-action">›</div>
+                        </div>
+
+                        <div class="bubble-meta">
+                            11:05 <span class="blue-ticks">✓✓</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</body>
+</html>

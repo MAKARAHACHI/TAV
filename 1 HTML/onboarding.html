@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FollowUp - Onboarding</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* =========================================
+           Design Tokens
+           ========================================= */
+        :root {
+            --ink: #111b21;
+            --ink-light: #667781;
+            --primary: #3f8cff;
+            --primary-light: rgba(63, 140, 255, 0.1);
+            --accent: #17b3a3;
+            --bg-color: #f7f9fa;
+            --surface: #ffffff;
+            --radius-main: 24px;
+            --transition: 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Heebo', sans-serif; background-color: #d1d7db;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; color: var(--ink); padding: 20px; overflow: hidden;
+        }
+
+        /* Device Mockup */
+        .app-device {
+            width: 100%; max-width: 414px; height: 896px; max-height: 90vh;
+            background-color: var(--surface); /* לבן למסך פתיחה נקי */
+            border-radius: 44px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.15), inset 0 0 0 12px #000;
+            overflow: hidden; display: flex; flex-direction: column; position: relative;
+        }
+        
+        /* Dynamic Island */
+        .app-device::before {
+            content: ''; position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            width: 120px; height: 28px; background: #000; border-radius: 20px; z-index: 100;
+        }
+
+        /* =========================================
+           Slider Container
+           ========================================= */
+        .slider-container {
+            flex: 1; position: relative; overflow: hidden;
+        }
+
+        .slide {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            padding: 80px 32px 40px; display: flex; flex-direction: column;
+            transition: var(--transition);
+            opacity: 0; transform: translateX(100%); /* RTL: Start from right */
+            pointer-events: none;
+        }
+        
+        .slide.active {
+            opacity: 1; transform: translateX(0); pointer-events: all;
+        }
+        
+        .slide.past {
+            opacity: 0; transform: translateX(-100%); /* Move to left */
+        }
+
+        /* =========================================
+           Slide Content Styles
+           ========================================= */
+        .slide-image {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            font-size: 6rem; margin-bottom: 20px;
+            animation: float 4s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .slide-content { text-align: center; margin-bottom: 40px; }
+        .slide-content h2 { font-size: 1.8rem; font-weight: 800; margin-bottom: 12px; line-height: 1.2; }
+        .slide-content p { font-size: 1.05rem; color: var(--ink-light); line-height: 1.5; }
+
+        /* Form Inputs (for Slide 2) */
+        .input-group { margin-bottom: 16px; text-align: right; }
+        .input-group label { display: block; font-size: 0.85rem; font-weight: 700; color: var(--ink-light); margin-bottom: 6px; }
+        .input-group input {
+            width: 100%; padding: 16px; background: #f4f6f8; border: 2px solid transparent;
+            border-radius: 16px; font-family: inherit; font-size: 1rem; color: var(--ink);
+            transition: var(--transition);
+        }
+        .input-group input:focus { background: #fff; border-color: var(--primary); outline: none; }
+
+        /* Permissions Box (for Slide 3) */
+        .perm-box {
+            background: #f8fafb; border: 1px solid #eaeaea; border-radius: 20px;
+            padding: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 16px;
+            text-align: right;
+        }
+        .perm-icon {
+            width: 44px; height: 44px; border-radius: 12px; background: #fff;
+            display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04); flex-shrink: 0;
+        }
+        .perm-text h3 { font-size: 0.95rem; font-weight: 800; margin-bottom: 2px; }
+        .perm-text p { font-size: 0.8rem; color: var(--ink-light); }
+
+        /* =========================================
+           Bottom Controls (Dots & Buttons)
+           ========================================= */
+        .controls {
+            padding: 20px 32px 40px; background: var(--surface);
+            display: flex; flex-direction: column; align-items: center; gap: 24px;
+        }
+
+        .dots { display: flex; gap: 8px; }
+        .dot {
+            width: 8px; height: 8px; border-radius: 4px; background: #e1e5e8;
+            transition: var(--transition);
+        }
+        .dot.active { width: 24px; background: var(--primary); }
+
+        .btn-primary {
+            width: 100%; background: var(--primary); color: white;
+            padding: 18px; border-radius: 16px; border: none;
+            font-size: 1.1rem; font-weight: 700; cursor: pointer;
+            box-shadow: 0 8px 20px rgba(63,140,255,0.25); transition: 0.2s;
+        }
+        .btn-primary:active { transform: translateY(2px); }
+        
+        .btn-secondary {
+            background: none; border: none; color: var(--ink-light);
+            font-size: 0.9rem; font-weight: 500; cursor: pointer; margin-top: -10px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-device">
+        <div class="slider-container">
+            
+            <!-- Slide 1: Welcome -->
+            <div class="slide active" id="slide-1">
+                <div class="slide-image">✨</div>
+                <div class="slide-content">
+                    <h2>ברוכים הבאים<br>ל-FollowUp</h2>
+                    <p>העוזר האישי שלך לניהול לקוחות.<br>מעכשיו, המערכת תדאג שאף לקוח לא ירגיש ששכחו אותו, בצורה 100% אוטומטית.</p>
+                </div>
+            </div>
+
+            <!-- Slide 2: Details Setup -->
+            <div class="slide" id="slide-2">
+                <div class="slide-image" style="font-size: 4rem; margin-bottom: 0;">📝</div>
+                <div class="slide-content">
+                    <h2>בואו נכיר</h2>
+                    <p>הפרטים האלו ישמשו ליצירת כרטיס הביקור הדיגיטלי שיישלח ללקוחות שלך.</p>
+                </div>
+                <div style="flex: 1;">
+                    <div class="input-group">
+                        <label>איך קוראים לך?</label>
+                        <input type="text" placeholder="לדוגמה: דני לוי">
+                    </div>
+                    <div class="input-group">
+                        <label>מה התפקיד או העסק שלך?</label>
+                        <input type="text" placeholder="לדוגמה: עו״ד מקרקעין">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 3: Permissions (The Trust Fall) -->
+            <div class="slide" id="slide-3">
+                <div class="slide-image" style="font-size: 4rem; margin-bottom: 0;">🛡️</div>
+                <div class="slide-content">
+                    <h2>כדי שזה יעבוד קסם...</h2>
+                    <p>אנחנו צריכים את אישורך לזהות שיחות. אל דאגה, הכל פועל אופליין על המכשיר שלך, בלי שרתים ובלי מעקב.</p>
+                </div>
+                <div style="flex: 1;">
+                    <div class="perm-box">
+                        <div class="perm-icon">📞</div>
+                        <div class="perm-text">
+                            <h3>זיהוי שיחות נכנסות</h3>
+                            <p>כדי לדעת מתי שיחה לא נענתה או הסתיימה.</p>
+                        </div>
+                    </div>
+                    <div class="perm-box">
+                        <div class="perm-icon">💬</div>
+                        <div class="perm-text">
+                            <h3>שליחת SMS</h3>
+                            <p>כדי לשלוח את הודעת ההמשך בשמך.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 4: All Set -->
+            <div class="slide" id="slide-4">
+                <div class="slide-image">🎉</div>
+                <div class="slide-content">
+                    <h2>הכל מוכן!</h2>
+                    <p>המערכת מוגדרת ועובדת ברקע.<br>אתה יכול להמשיך בשגרת היום שלך, אנחנו נדאג ללקוחות שמתקשרים.</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Controls Zone -->
+        <div class="controls">
+            <div class="dots">
+                <div class="dot active" id="dot-1"></div>
+                <div class="dot" id="dot-2"></div>
+                <div class="dot" id="dot-3"></div>
+                <div class="dot" id="dot-4"></div>
+            </div>
+            
+            <button class="btn-primary" id="next-btn" onclick="nextSlide()">המשך</button>
+            <button class="btn-secondary" id="skip-btn" onclick="skipToHome()" style="display: none;">דלג להגדרות</button>
+        </div>
+    </div>
+
+    <!-- Script for Slider Logic -->
+    <script>
+        let currentSlide = 1;
+        const totalSlides = 4;
+        const nextBtn = document.getElementById('next-btn');
+        const skipBtn = document.getElementById('skip-btn');
+
+        function nextSlide() {
+            if (currentSlide < totalSlides) {
+                // Remove active from current, mark as past
+                const currentElement = document.getElementById(`slide-${currentSlide}`);
+                currentElement.classList.remove('active');
+                currentElement.classList.add('past');
+                
+                // Remove active from dot
+                document.getElementById(`dot-${currentSlide}`).classList.remove('active');
+
+                // Increment
+                currentSlide++;
+
+                // Add active to next
+                document.getElementById(`slide-${currentSlide}`).classList.add('active');
+                document.getElementById(`dot-${currentSlide}`).classList.add('active');
+
+                // Update Button Text contextually
+                if (currentSlide === 2) {
+                    nextBtn.innerText = "המשך לשלב הבא";
+                } else if (currentSlide === 3) {
+                    nextBtn.innerText = "אשר גישה (חובה)";
+                    nextBtn.style.background = "var(--ink)"; // Make it look serious/system
+                    nextBtn.style.boxShadow = "0 8px 20px rgba(17, 27, 33, 0.25)";
+                    skipBtn.style.display = "block";
+                    skipBtn.innerText = "אשר מאוחר יותר";
+                } else if (currentSlide === 4) {
+                    nextBtn.innerText = "התחל לעבוד";
+                    nextBtn.style.background = "var(--primary)";
+                    nextBtn.style.boxShadow = "0 8px 20px rgba(63,140,255,0.25)";
+                    skipBtn.style.display = "none";
+                }
+            } else {
+                // Finish Onboarding - In a real app, this redirects to the Home Screen
+                alert("ברוך הבא לאפליקציה! מכאן עוברים למסך הבית (Home Screen).");
+            }
+        }
+
+        function skipToHome() {
+            // Function for the secondary button (like skipping permissions for now)
+            alert("מדלג... ההרשאות יתבקשו שוב דרך מסך ההגדרות.");
+        }
+    </script>
+</body>
+</html>

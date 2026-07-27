@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FollowUp - Profile & Settings</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* =========================================
+           Design Tokens 
+           ========================================= */
+        :root {
+            --ink: #111b21;
+            --ink-light: #667781;
+            --primary: #3f8cff;
+            --primary-hover: #2970da;
+            --accent: #17b3a3;
+            --bg-color: #f7f9fa;
+            --surface: #ffffff;
+            --error: #e74c3c;
+            --radius-main: 24px;
+            --shadow-card: 0 4px 15px rgba(0,0,0,0.03);
+            --transition: 0.3s ease;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Heebo', sans-serif; background-color: #d1d7db;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; color: var(--ink); padding: 20px;
+        }
+
+        /* Device Mockup */
+        .app-device {
+            width: 100%; max-width: 414px; height: 896px; max-height: 90vh;
+            background-color: var(--bg-color);
+            border-radius: 44px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.15), inset 0 0 0 12px #000;
+            overflow: hidden; display: flex; flex-direction: column; position: relative;
+        }
+        
+        /* Dynamic Island */
+        .app-device::before {
+            content: ''; position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            width: 120px; height: 28px; background: #000; border-radius: 20px; z-index: 100;
+        }
+
+        /* =========================================
+           Top Navigation
+           ========================================= */
+        .nav-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 50px 20px 15px; background: var(--bg-color); z-index: 10;
+        }
+        .nav-btn {
+            background: none; border: none; font-size: 1.2rem; cursor: pointer;
+            color: var(--primary); display: flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px; border-radius: 50%; background: rgba(63,140,255,0.1);
+        }
+        .nav-title { font-weight: 800; font-size: 1.1rem; color: var(--ink); }
+
+        .scroll-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 24px 40px; }
+        .scroll-area::-webkit-scrollbar { display: none; }
+
+        /* =========================================
+           Profile Header (Avatar)
+           ========================================= */
+        .profile-header {
+            display: flex; flex-direction: column; align-items: center;
+            margin-top: 10px; margin-bottom: 30px;
+        }
+        .avatar-container {
+            position: relative; width: 100px; height: 100px; margin-bottom: 16px;
+        }
+        .avatar {
+            width: 100%; height: 100%; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), #128c7e);
+            color: white; display: flex; align-items: center; justify-content: center;
+            font-size: 2.5rem; font-weight: 800; box-shadow: 0 8px 20px rgba(23,179,163,0.3);
+        }
+        .edit-avatar-btn {
+            position: absolute; bottom: 0; right: 0;
+            background: var(--surface); color: var(--primary);
+            width: 32px; height: 32px; border-radius: 50%; border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; cursor: pointer;
+        }
+        .profile-header h2 { font-size: 1.4rem; font-weight: 800; }
+        .profile-header p { color: var(--ink-light); font-size: 0.95rem; }
+
+        /* =========================================
+           Cards & Forms
+           ========================================= */
+        .card {
+            background: var(--surface); border-radius: var(--radius-main);
+            padding: 24px; margin-bottom: 24px; box-shadow: var(--shadow-card);
+        }
+        .card-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;}
+        
+        .input-group { margin-bottom: 16px; position: relative; }
+        .input-group label {
+            display: block; font-size: 0.85rem; font-weight: 700;
+            color: var(--ink-light); margin-bottom: 6px;
+        }
+        .input-group input {
+            width: 100%; padding: 14px 16px;
+            background: #f4f6f8; border: 1px solid transparent;
+            border-radius: 14px; font-family: inherit; font-size: 1rem; color: var(--ink);
+            transition: var(--transition);
+        }
+        .input-group input:focus {
+            background: #fff; border-color: var(--primary); outline: none;
+            box-shadow: 0 0 0 4px rgba(63,140,255,0.1);
+        }
+
+        /* =========================================
+           Permissions Section (Crucial UX)
+           ========================================= */
+        .permission-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 0; border-bottom: 1px solid #f0f0f0;
+        }
+        .permission-row:last-child { border-bottom: none; padding-bottom: 0; }
+        
+        .perm-info { display: flex; align-items: center; gap: 12px; }
+        .perm-icon {
+            width: 40px; height: 40px; border-radius: 12px;
+            background: #f4f6f8; display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem;
+        }
+        .perm-text h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 2px;}
+        .perm-text p { font-size: 0.8rem; color: var(--ink-light); }
+        
+        .status-badge {
+            padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
+        }
+        .status-granted { background: var(--bubble-green); color: #2a5a15; }
+        .status-missing { background: #ffeae8; color: var(--error); cursor: pointer;}
+
+        /* Save Button */
+        .save-btn-large {
+            width: 100%; background: var(--primary); color: white;
+            padding: 16px; border-radius: 16px; border: none;
+            font-size: 1.1rem; font-weight: 700; margin-top: 10px;
+            box-shadow: 0 8px 20px rgba(63,140,255,0.25); cursor: pointer; transition: 0.2s;
+        }
+        .save-btn-large:active { transform: translateY(2px); }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-device">
+        <!-- Top Nav -->
+        <div class="nav-bar">
+            <button class="nav-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <div class="nav-title">הגדרות פרופיל</div>
+            <div style="width: 40px;"></div> <!-- Spacer to center title -->
+        </div>
+
+        <div class="scroll-area">
+            
+            <!-- Avatar Section -->
+            <div class="profile-header">
+                <div class="avatar-container">
+                    <div class="avatar" id="avatar-display">דל</div>
+                    <button class="edit-avatar-btn">📷</button>
+                </div>
+                <h2>הפרטים שלך</h2>
+                <p>יופיעו בכרטיס הביקור ובהודעות</p>
+            </div>
+
+            <!-- Form Details -->
+            <div class="card">
+                <div class="card-title">📝 פרטים אישיים</div>
+                
+                <div class="input-group">
+                    <label>שם מלא (יופיע ב-[השם שלי])</label>
+                    <input type="text" id="name-input" value="דני לוי">
+                </div>
+                
+                <div class="input-group">
+                    <label>תפקיד / מקצוע (יופיע ב-[תפקיד])</label>
+                    <input type="text" value="עו״ד מקרקעין">
+                </div>
+                
+                <div class="input-group">
+                    <label>שם העסק (יופיע ב-[שם העסק])</label>
+                    <input type="text" value="לוי ושות' - משרד עורכי דין">
+                </div>
+                
+                <div class="input-group">
+                    <label>מספר טלפון לכרטיס הביקור</label>
+                    <input type="tel" value="052-1234567" dir="ltr" style="text-align: right;">
+                </div>
+            </div>
+
+            <!-- Permissions (Critical for Android App) -->
+            <div class="card">
+                <div class="card-title">🛡️ הרשאות מערכת</div>
+                <p style="font-size: 0.85rem; color: #667781; margin-bottom: 16px;">כדי שהאפליקציה תוכל לזהות שיחות ולשלוח הודעות, עליך לאשר את ההרשאות הבאות:</p>
+                
+                <div class="permission-row">
+                    <div class="perm-info">
+                        <div class="perm-icon">📞</div>
+                        <div class="perm-text">
+                            <h3>זיהוי שיחות</h3>
+                            <p>מזהה מתי פספסת שיחה</p>
+                        </div>
+                    </div>
+                    <div class="status-badge status-granted">✔ מאושר</div>
+                </div>
+
+                <div class="permission-row">
+                    <div class="perm-info">
+                        <div class="perm-icon">💬</div>
+                        <div class="perm-text">
+                            <h3>שליחת SMS</h3>
+                            <p>לשליחת הודעת ההמשך</p>
+                        </div>
+                    </div>
+                    <div class="status-badge status-granted">✔ מאושר</div>
+                </div>
+
+                <div class="permission-row">
+                    <div class="perm-info">
+                        <div class="perm-icon">📇</div>
+                        <div class="perm-text">
+                            <h3>אנשי קשר (מומלץ)</h3>
+                            <p>כדי לא לשלוח לאנשים שכבר שמורים</p>
+                        </div>
+                    </div>
+                    <div class="status-badge status-missing">הענק הרשאה</div>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <button class="save-btn-large">שמור שינויים</button>
+            <p style="text-align: center; font-size: 0.75rem; color: #a0aab2; margin-top: 16px;">גרסת אפליקציה 1.0.2</p>
+        </div>
+    </div>
+
+    <!-- Script to dynamically update avatar letters when typing name -->
+    <script>
+        const nameInput = document.getElementById('name-input');
+        const avatarDisplay = document.getElementById('avatar-display');
+
+        nameInput.addEventListener('input', function() {
+            const name = this.value.trim();
+            if (name === '') {
+                avatarDisplay.innerText = '?';
+                return;
+            }
+            
+            const parts = name.split(' ');
+            let initials = parts[0].charAt(0);
+            if (parts.length > 1 && parts[1].length > 0) {
+                initials += parts[1].charAt(0);
+            }
+            avatarDisplay.innerText = initials;
+        });
+    </script>
+</body>
+</html>
