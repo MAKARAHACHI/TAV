@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
@@ -55,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -109,7 +111,10 @@ internal enum class AccessibilityModal {
     MISSED_JOURNEY,
     ENDED_JOURNEY,
     // System maintenance, reached only from the small ⚙️ on Home — never from navigation.
-    SYSTEM_SETTINGS
+    SYSTEM_SETTINGS,
+    // Reached from a row inside SYSTEM_SETTINGS (⚙️ list navigation — plan v2 §"ניווט").
+    HISTORY,
+    SUPPORT
 }
 
 /** Candidate source for the multi-picker overlay. */
@@ -187,6 +192,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
     val whatsAppAutoSendController = remember(context) { WhatsAppAutoSendController(appContext) }
+    val setupPreferences = remember(context) { com.followupnadlan.setup.SetupPreferences(appContext) }
+
+    var onboardingDone by remember { mutableStateOf(setupPreferences.isSetupCompleted()) }
 
     var tab by remember { mutableStateOf(AccessibilityTab.HOME) }
     var modal by remember {
@@ -276,6 +284,28 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         }
     }
 
+    if (!onboardingDone) {
+        Surface(modifier = Modifier.fillMaxSize(), color = AccessibilityColors.ScreenBackground) {
+            OnboardingScreen(
+                myDetailsStore = myDetailsStore,
+                setupPreferences = setupPreferences,
+                onRequestCallPermissions = {
+                    phoneStateGranted = context.hasPermission(Manifest.permission.READ_PHONE_STATE)
+                    callLogGranted = context.hasPermission(Manifest.permission.READ_CALL_LOG)
+                    if (phoneStateGranted && callLogGranted) {
+                        settings.isEnabled = true
+                        callDetectionPreferences.setEnabled(true)
+                        bridgingEnabled = true
+                        applyCallDetectionServiceState(appContext, bridgeEnabled = true, phoneStateGranted, callLogGranted)
+                        diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
+                    }
+                },
+                onFinish = { onboardingDone = true }
+            )
+        }
+        return
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = AccessibilityColors.ScreenBackground) {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
@@ -363,6 +393,22 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             endedBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
                             cardAttached = cardAttached,
+                            cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
+                                card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
+                                    .joinToString("") { it.take(1) }.ifBlank { "דל" }
+                            },
+                            cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" },
+                            onToggleEnabled = {
+                                if (bridgingEnabled) {
+                                    settings.isEnabled = false
+                                    callDetectionPreferences.setEnabled(false)
+                                    bridgingEnabled = false
+                                    applyCallDetectionServiceState(appContext, bridgeEnabled = false, phoneStateGranted, callLogGranted)
+                                    diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
+                                } else {
+                                    modal = AccessibilityModal.SETUP
+                                }
+                            },
                             onOpenMissedJourney = { modal = AccessibilityModal.MISSED_JOURNEY },
                             onOpenEndedJourney = { modal = AccessibilityModal.ENDED_JOURNEY },
                             // The ⚠️ leads to whichever fix it is about: an empty profile opens the
@@ -606,8 +652,19 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             )
                         },
                         onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
+                        onOpenHistory = { modal = AccessibilityModal.HISTORY },
+                        onOpenSupport = { modal = AccessibilityModal.SUPPORT },
                         onDeleteHistory = { logStore.clear() },
                         onBack = { modal = AccessibilityModal.NONE }
+                    )
+
+                    AccessibilityModal.HISTORY -> HistoryScreen(
+                        logStore = logStore,
+                        onBack = { modal = AccessibilityModal.SYSTEM_SETTINGS }
+                    )
+
+                    AccessibilityModal.SUPPORT -> SupportScreen(
+                        onBack = { modal = AccessibilityModal.SYSTEM_SETTINGS }
                     )
 
                     AccessibilityModal.SMART_RULES -> SmartRulesScreen(
@@ -652,23 +709,21 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         messageEditorTarget = null
                     } else {
                         val isReminder = role == TemplateRole.CALL_ENDED
-                        HomeMessageEditorDialog(
-                            message = editingTemplate.body,
+                        MessageEditorScreen(
+                            isEnded = isReminder,
+                            body = editingTemplate.body,
+                            signature = signaturePreview,
+                            cardAttached = cardAttached,
+                            onToggleCardAttached = {
+                                cardAttached = !cardAttached
+                                endedCardSettings.cardAttached = cardAttached
+                            },
                             onSave = { newBody ->
                                 templateStore.saveTemplate(editingTemplate.copy(body = newBody))
                                 templates = templateStore.loadTemplates()
                                 messageEditorTarget = null
                             },
-                            onCancel = { messageEditorTarget = null },
-                            title = if (isReminder) "עריכת התזכורת" else "עריכת ההודעה",
-                            description = if (isReminder)
-                                "זו התזכורת שתישלח ללקוח אחרי שיחה."
-                            else
-                                "זו ההודעה שתישלח ללקוח כשלא תוכל לענות.",
-                            emptyError = if (isReminder)
-                                "התזכורת לא יכולה להיות ריקה"
-                            else
-                                "ההודעה לא יכולה להיות ריקה"
+                            onBack = { messageEditorTarget = null }
                         )
                     }
                 }
@@ -1284,11 +1339,15 @@ private fun HomeScreen(
     endedBody: String,
     signature: String,
     cardAttached: Boolean,
+    cardInitials: String,
+    cardLine1: String,
+    onToggleEnabled: () -> Unit,
     onOpenMissedJourney: () -> Unit,
     onOpenEndedJourney: () -> Unit,
     onResolveWarning: () -> Unit,
     onOpenSystemSettings: () -> Unit
 ) {
+    val colors = AccessibilityExtra.colors
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1296,25 +1355,79 @@ private fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // The ⚙️ is present but not part of navigation — 95% of the time nobody needs it.
+        // Header — greeting + ⚙️ (HOME.html .header). ⚙️ is present but not part of
+        // navigation — 95% of the time nobody needs it.
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Icon(
-                AccessibilityIcons.Settings,
-                contentDescription = "הגדרות מערכת",
-                tint = AccessibilityColors.TextFaint,
-                modifier = Modifier
-                    .size(22.dp)
-                    .clickable(onClick = onOpenSystemSettings)
-            )
+            Column {
+                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = colors.heading)
+                Text(
+                    "מערכת הפולואפ פעילה",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.textMuted
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = colors.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEAEAEA)),
+                shadowElevation = 2.dp
+            ) {
+                Icon(
+                    AccessibilityIcons.Settings,
+                    contentDescription = "הגדרות מערכת",
+                    tint = colors.textMuted,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clickable(onClick = onOpenSystemSettings)
+                        .padding(11.dp)
+                )
+            }
         }
 
         // Shown only when something is actually broken; otherwise Home stays silent.
         warning?.let {
             HomeWarningRow(text = HomeWarningLogic.message(it), onClick = onResolveWarning)
         }
+
+        // Master toggle card (HOME.html .master-card) — the real bridging on/off switch.
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = colors.heading,
+            shadowElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("מצב אוטומטי", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text(
+                        if (missedEnabled) "האפליקציה עובדת ברקע" else "כבוי — לקוחות לא יקבלו הודעה",
+                        color = colors.green,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp
+                    )
+                }
+                Switch(checked = missedEnabled, onCheckedChange = { onToggleEnabled() })
+            }
+        }
+
+        // Stats — not-wired example numbers (plan v2 §3: no DB-backed counters yet).
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            HomeStatBox(value = "4", label = "לקוחות ניצלו היום", modifier = Modifier.weight(1f))
+            HomeStatBox(value = "12", label = "הודעות נשלחו השבוע", modifier = Modifier.weight(1f))
+        }
+
+        Text("ההודעות שלך", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = colors.heading)
 
         // Home is a mirror: each card shows the real message, not a sentence about it.
         HomeMomentCard(
@@ -1324,6 +1437,7 @@ private fun HomeScreen(
             signature = signature,
             dimmed = !missedEnabled,
             footnote = if (missedEnabled) null else "לקוחות שלא נענו לא יקבלו הודעה",
+            card = null,
             onOpen = onOpenMissedJourney
         )
 
@@ -1331,11 +1445,25 @@ private fun HomeScreen(
             emoji = "🤝",
             title = "אחרי שדיברנו",
             body = endedBody,
-            signature = if (cardAttached) signature else "",
+            signature = "",
             dimmed = false,
             footnote = null,
+            card = if (cardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
             onOpen = onOpenEndedJourney
         )
+    }
+}
+
+private data class HomeCardPreview(val initials: String, val line1: String)
+
+@Composable
+private fun HomeStatBox(value: String, label: String, modifier: Modifier = Modifier) {
+    val colors = AccessibilityExtra.colors
+    AppCard(modifier = modifier, cornerRadius = 20) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(value, fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = colors.primary)
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = colors.textMuted)
+        }
     }
 }
 
@@ -1390,60 +1518,117 @@ private fun HomeMomentCard(
     signature: String,
     dimmed: Boolean,
     footnote: String?,
+    card: HomeCardPreview?,
     onOpen: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
     val alpha = if (dimmed) 0.45f else 1f
-    AppCard(
-        cornerRadius = 22,
-        background = colors.screenBackgroundAlt,
-        modifier = Modifier.clickable(onClick = onOpen)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AppCard(cornerRadius = 24, background = colors.surface) {
+        Column {
+            // config-header: icon + title + "עריכה" (HOME.html .config-header)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = emoji, fontSize = 22.sp)
-                Text(
-                    text = title,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 19.sp,
-                    color = colors.heading,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    AccessibilityIcons.ChevronStart,
-                    contentDescription = null,
-                    tint = colors.textFaint,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Surface(
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                color = colors.bubbleGreen.copy(alpha = alpha),
-                shadowElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(text = emoji, fontSize = 19.sp)
+                    Text(text = title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = colors.textStrong)
+                }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.primaryContainer,
+                    modifier = Modifier.clickable(onClick = onOpen)
+                ) {
                     Text(
-                        text = body.ifBlank { " " },
-                        color = colors.textStrong.copy(alpha = alpha),
-                        fontSize = 15.sp,
-                        lineHeight = 23.sp,
-                        maxLines = 4
+                        "עריכה",
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
-                    if (signature.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
+                }
+            }
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F0F0)))
+
+            // chat-preview-zone: realistic bubble, matching the WhatsApp look exactly.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFEFEAE2))
+                    .clickable(onClick = onOpen)
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+                    color = colors.bubbleGreen.copy(alpha = alpha),
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                         Text(
-                            text = signature,
-                            color = colors.textMuted.copy(alpha = alpha),
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            maxLines = 1
+                            text = body.ifBlank { " " },
+                            color = colors.textStrong.copy(alpha = alpha),
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                            maxLines = 4
                         )
+                        if (signature.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = signature,
+                                color = colors.textMuted.copy(alpha = alpha),
+                                fontSize = 13.sp,
+                                lineHeight = 20.sp,
+                                maxLines = 1
+                            )
+                        }
+
+                        // vCard-attachment element inside the bubble (HOME.html .vcard-attachment).
+                        // Drawn exactly as designed but not-wired: WhatsApp blocks file-share to an
+                        // unsaved number's chat, so the real send stays text-only (plan v2 §3).
+                        card?.let {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surface)
+                                    .border(1.dp, Color(0x0D000000), RoundedCornerShape(12.dp))
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E)))),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(it.initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(it.line1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = colors.textStrong)
+                                    Text("איש קשר (.vcf)", fontSize = 12.sp, color = colors.textMuted)
+                                }
+                                Icon(
+                                    AccessibilityIcons.ChevronStart,
+                                    contentDescription = null,
+                                    tint = Color(0xFF128C7E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("10:42", fontSize = 10.sp, color = Color(0xFF667781))
+                            // ✓✓ static — no WhatsApp delivery-receipt access (plan v2 §3).
+                            Text("✓✓", fontSize = 10.sp, color = AccessibilityColors.WaCheck)
+                        }
                     }
                 }
             }
@@ -1453,7 +1638,7 @@ private fun HomeMomentCard(
                     text = it,
                     fontSize = 13.sp,
                     color = colors.textMuted,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
                 )
             }
         }
@@ -1522,71 +1707,6 @@ private fun WhatsAppMessagePreview(message: String, maxLines: Int = 4) {
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)
         )
     }
-}
-
-@Composable
-private fun HomeMessageEditorDialog(
-    message: String,
-    onSave: (String) -> Unit,
-    onCancel: () -> Unit,
-    title: String = "עריכת ההודעה",
-    description: String = "זו ההודעה שתיפתח ב־WhatsApp או SMS לאחר שיחה שלא נענתה.",
-    emptyError: String = "ההודעה לא יכולה להיות ריקה"
-) {
-    var draft by remember(message) { mutableStateOf(message) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun saveDraft() {
-        if (draft.isBlank()) {
-            error = emptyError
-            return
-        }
-        onSave(draft)
-    }
-
-    val colors = AccessibilityExtra.colors
-    AlertDialog(
-        modifier = Modifier
-            .imePadding()
-            .navigationBarsPadding(),
-        shape = RoundedCornerShape(22.dp),
-        onDismissRequest = onCancel,
-        title = { Text(title, fontWeight = FontWeight.ExtraBold, color = colors.heading) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    description,
-                    color = colors.textMuted,
-                    fontSize = 14.sp
-                )
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = {
-                        draft = it
-                        error = null
-                    },
-                    minLines = 6,
-                    maxLines = 10,
-                    keyboardActions = KeyboardActions(onDone = { saveDraft() }),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 180.dp, max = 310.dp)
-                )
-                error?.let { Text(it, color = colors.danger, fontSize = 13.sp) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { saveDraft() }) {
-                Text("שמור", fontWeight = FontWeight.Bold, color = colors.primary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text("ביטול", color = colors.textBody)
-            }
-        }
-    )
 }
 
 private fun homeServiceStatusIcon(kind: HomeServiceStatusKind): ImageVector =
@@ -2796,6 +2916,8 @@ private fun SystemSettingsScreen(
     cooldownSettings: FollowUpCooldownSettings,
     onRequestPermissions: () -> Unit,
     onOpenSmartRules: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSupport: () -> Unit,
     onDeleteHistory: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -2883,6 +3005,25 @@ private fun SystemSettingsScreen(
                 leadingTint = AccessibilityColors.Primary,
                 onClick = onOpenSmartRules
             )
+        }
+
+        // ⚙️-list navigation to the two remaining screens (plan v2): history and support.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                NavigationRowContent(
+                    label = "יומן פעילות",
+                    leadingIcon = AccessibilityIcons.Today,
+                    leadingTint = AccessibilityColors.Primary,
+                    onClick = onOpenHistory
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(AccessibilityColors.CardBorder))
+                NavigationRowContent(
+                    label = "תמיכה ומערכת",
+                    leadingIcon = AccessibilityIcons.WhatsApp,
+                    leadingTint = AccessibilityColors.Green,
+                    onClick = onOpenSupport
+                )
+            }
         }
 
         // Privacy, stated plainly: there is no server to talk about.
@@ -3058,11 +3199,17 @@ private fun SignatureCardEditorScreen(
     store: MyDetailsStore,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var profile by remember { mutableStateOf(store.load()) }
     var fullName by remember { mutableStateOf(profile.agentName) }
     var occupation by remember { mutableStateOf(profile.officeName) }
     var phone by remember { mutableStateOf(profile.phone) }
     var website by remember { mutableStateOf(profile.website) }
+    var contactsGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CONTACTS)) }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> contactsGranted = granted }
 
     fun persist() {
         val trimmed = profile.copy(
@@ -3075,57 +3222,167 @@ private fun SignatureCardEditorScreen(
         profile = trimmed
     }
 
+    val initials = fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
+        .joinToString("") { it.take(1) }.ifBlank { "?" }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .imePadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        ModalHeader(title = "כרטיס הביקור", onBack = { persist(); onBack() })
+        ModalHeader(title = "הגדרות פרופיל", onBack = { persist(); onBack() })
 
-        OutlinedTextField(
-            value = fullName,
-            onValueChange = { fullName = it },
-            label = { Text("שם") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = occupation,
-            onValueChange = { occupation = it },
-            label = { Text("עיסוק") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = phone,
-            onValueChange = { phone = it },
-            label = { Text("טלפון") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = website,
-            onValueChange = { website = it },
-            label = { Text("אתר (אופציונלי)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // The card as it will actually be shared — website appears only when filled.
-        val livePreview = ContactCard(fullName = fullName, org = occupation, phone = phone, website = website)
-        if (livePreview.fullName.isNotBlank() || livePreview.phone.isNotBlank()) {
-            Spacer(modifier = Modifier.height(2.dp))
-            ContactCardPreview(livePreview)
+        // Avatar header (profile.html .profile-header) — initials update live as you type.
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Box(modifier = Modifier.size(100.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E)))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(initials, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 32.sp)
+                }
+                // Photo edit — drawn as designed, not wired (no camera/avatar-upload feature).
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(AccessibilityColors.Surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("📷", fontSize = 14.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("הפרטים שלך", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = AccessibilityColors.Heading)
+            Text("יופיעו בכרטיס הביקור ובהודעות", fontSize = 13.sp, color = AccessibilityColors.TextMuted)
         }
 
-        PillButton(text = "שמור", onClick = { persist(); onBack() })
+        AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("📝 פרטים אישיים", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = AccessibilityColors.Heading)
+                LabeledField(label = "שם מלא (יופיע ב-[השם שלי])", value = fullName, onChange = { fullName = it })
+                LabeledField(label = "תפקיד / מקצוע (יופיע ב-[תפקיד] ו-[שם העסק])", value = occupation, onChange = { occupation = it })
+                LabeledField(
+                    label = "מספר טלפון לכרטיס הביקור",
+                    value = phone,
+                    onChange = { phone = it },
+                    keyboardType = KeyboardType.Phone
+                )
+                LabeledField(
+                    label = "אתר (אופציונלי)",
+                    value = website,
+                    onChange = { website = it },
+                    keyboardType = KeyboardType.Uri
+                )
+            }
+        }
+
+        // Permissions card (profile.html §"הרשאות מערכת") — live-granted status, real request.
+        AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("🛡️ הרשאות מערכת", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = AccessibilityColors.Heading)
+                Text(
+                    "כדי שהאפליקציה תוכל לזהות שיחות ולשלוח הודעות, עליך לאשר את ההרשאות הבאות:",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = AccessibilityColors.TextMuted,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                ProfilePermissionRow(
+                    emoji = "📞",
+                    title = "זיהוי שיחות",
+                    description = "מזהה מתי פספסת שיחה",
+                    granted = context.hasPermission(Manifest.permission.READ_PHONE_STATE),
+                    onRequest = null
+                )
+                ProfilePermissionRow(
+                    emoji = "💬",
+                    title = "שליחת SMS",
+                    description = "לשליחת הודעת ההמשך",
+                    granted = context.hasPermission(Manifest.permission.SEND_SMS),
+                    onRequest = null
+                )
+                ProfilePermissionRow(
+                    emoji = "📇",
+                    title = "אנשי קשר (מומלץ)",
+                    description = "כדי לא לשלוח לאנשים שכבר שמורים",
+                    granted = contactsGranted,
+                    onRequest = { contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS) }
+                )
+            }
+        }
+
+        PillButton(text = "שמור שינויים", onClick = { persist(); onBack() })
+        Text(
+            "FollowUp · גרסה ${com.followupnadlan.BuildConfig.VERSION_NAME}",
+            fontSize = 11.sp,
+            color = AccessibilityColors.TextFaint,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun LabeledField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Text
+) {
+    Column {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccessibilityColors.TextMuted)
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun ProfilePermissionRow(emoji: String, title: String, description: String, granted: Boolean, onRequest: (() -> Unit)?) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(AccessibilityColors.FieldGrey),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(emoji, fontSize = 16.sp)
+            }
+            Column {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
+                Text(description, fontSize = 12.sp, color = AccessibilityColors.TextMuted)
+            }
+        }
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = if (granted) AccessibilityExtra.colors.bubbleGreen else Color(0xFFFFEAE8),
+            modifier = if (!granted && onRequest != null) Modifier.clickable(onClick = onRequest) else Modifier
+        ) {
+            Text(
+                if (granted) "✔ מאושר" else "הענק הרשאה",
+                color = if (granted) Color(0xFF2A5A15) else AccessibilityColors.Danger,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 
