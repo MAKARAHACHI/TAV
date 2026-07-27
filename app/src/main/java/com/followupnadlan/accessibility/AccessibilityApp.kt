@@ -6,6 +6,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,6 +59,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -107,9 +113,11 @@ internal enum class AccessibilityModal {
     ALLOWED_RECIPIENTS,
     CONTACT_CARD,
     MISSED_CALL_PROMPT,
-    // Design Pass 2/3 — the two trust-moment journey pages, opened from the home cards.
+    // Design Pass 2/3 — the trust-moment journey pages, opened from the home cards.
     MISSED_JOURNEY,
     ENDED_JOURNEY,
+    // Part A — the "לא ענו" outgoing-not-answered moment's edit screen.
+    NO_ANSWER_JOURNEY,
     // System maintenance, reached only from the small ⚙️ on Home — never from navigation.
     SYSTEM_SETTINGS,
     // Reached from a row inside SYSTEM_SETTINGS (⚙️ list navigation — plan v2 §"ניווט").
@@ -128,6 +136,31 @@ internal data class ActivePicker(
     val title: String,
     val source: PickerSource,
     val target: PickerTarget
+)
+
+/**
+ * An open message-variant editor (Part B). [variantId] is a specific variant to edit, or blank to
+ * create a NEW variant for [role]. [role] drives the wording, tag set, and where a new variant is
+ * saved.
+ */
+internal data class MessageEditorTarget(
+    val role: TemplateRole,
+    val variantId: String,
+    val isNew: Boolean = false
+)
+
+/**
+ * Part B — the variant data + actions a moment's edit screen needs to show and manage its up-to-5
+ * message variants. Bundled so a journey screen takes one parameter instead of six.
+ */
+internal data class MomentVariants(
+    val variants: List<MessageTemplate>,
+    val activeId: String,
+    val canAdd: Boolean,
+    val onSelectActive: (String) -> Unit,
+    val onEditVariant: (String) -> Unit,
+    val onDeleteVariant: (String) -> Unit,
+    val onAddVariant: () -> Unit
 )
 
 internal data class AccessibilityBackState(
@@ -202,9 +235,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     }
     // Full-screen recipient multi-picker overlay (above the current tab/modal when non-null).
     var activePicker by remember { mutableStateOf<ActivePicker?>(null) }
-    // Wiring Pass step 1: which journey's message the "שנה את ההודעה/התזכורת" editor is open for
-    // (missed vs. ended, saved to separate templates). null = closed.
-    var messageEditorTarget by remember { mutableStateOf<TemplateRole?>(null) }
+    // Which message variant the editor is open for (Part B). null = closed. Carries the role (for
+    // wording/tags) and the specific variant id being edited — new variants get a blank id.
+    var messageEditorTarget by remember { mutableStateOf<MessageEditorTarget?>(null) }
     // Wiring Pass: journey-screen picker overlays (missed journey) and the ended journey's
     // in-page contact-card editor.
     var recipientPickerOpen by remember { mutableStateOf(false) }
@@ -246,7 +279,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     // calls (and manual home sends) the "call ended" wording.
     var selectedEndedId by remember { mutableStateOf(settings.selectedEndedTemplateId) }
     var selectedMissedId by remember { mutableStateOf(settings.selectedMissedTemplateId) }
+    // Part A/B: the active variant for the "לא ענו" outgoing-not-answered moment.
+    var selectedNoAnswerId by remember { mutableStateOf(settings.selectedNoAnswerTemplateId) }
     var templates by remember { mutableStateOf(templateStore.loadTemplates()) }
+    // Part C2: per-moment enable toggles (master gate stays bridgingEnabled/isEnabled).
+    var missedMomentEnabled by remember { mutableStateOf(settings.missedMomentEnabled) }
+    var endedMomentEnabled by remember { mutableStateOf(settings.endedMomentEnabled) }
+    var noAnswerMomentEnabled by remember { mutableStateOf(settings.noAnswerMomentEnabled) }
     var phoneStateGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_PHONE_STATE)) }
     var callLogGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CALL_LOG)) }
     var diagnosticsSnapshot by remember { mutableStateOf(callDetectionDiagnostics.snapshot()) }
@@ -282,6 +321,50 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         if (settings.preferredWhatsAppPackage.isBlank()) {
             settings.preferredWhatsAppPackage = WhatsAppPackageResolver.WHATSAPP_MESSENGER_PACKAGE
         }
+    }
+
+    // Part B: which stored id is the ACTIVE variant for a role, and how to set it.
+    fun activeIdFor(role: TemplateRole): String = when (role) {
+        TemplateRole.MISSED_CALL -> selectedMissedId
+        TemplateRole.CALL_ENDED -> selectedEndedId
+        TemplateRole.NO_ANSWER_OUTGOING -> selectedNoAnswerId
+    }
+
+    fun setActiveId(role: TemplateRole, id: String) {
+        when (role) {
+            TemplateRole.MISSED_CALL -> { selectedMissedId = id; settings.selectedMissedTemplateId = id }
+            TemplateRole.CALL_ENDED -> { selectedEndedId = id; settings.selectedEndedTemplateId = id }
+            TemplateRole.NO_ANSWER_OUTGOING -> { selectedNoAnswerId = id; settings.selectedNoAnswerTemplateId = id }
+        }
+    }
+
+    // Part B: build the variant bundle a moment's edit screen needs — the role's variants, the
+    // active id, and the add/edit/delete/select actions, all backed by the existing template store.
+    fun momentVariantsFor(role: TemplateRole): MomentVariants {
+        val roleVariants = templates.filter { it.role == role }
+        // Resolve the active id against what actually exists (an orphaned stored id falls back to
+        // the first variant of the role, matching the send-path selector).
+        val resolvedActive = roleVariants.firstOrNull { it.id == activeIdFor(role) }?.id
+            ?: roleVariants.firstOrNull()?.id.orEmpty()
+        return MomentVariants(
+            variants = roleVariants,
+            activeId = resolvedActive,
+            canAdd = templates.count { it.role == role } < TemplateStore.MAX_VARIANTS_PER_ROLE,
+            onSelectActive = { id -> setActiveId(role, id) },
+            onEditVariant = { id -> messageEditorTarget = MessageEditorTarget(role, id) },
+            onDeleteVariant = { id ->
+                templateStore.deleteVariant(id)
+                val reloaded = templateStore.loadTemplates()
+                templates = reloaded
+                // If the active variant was deleted, fall back to the first remaining of the role.
+                if (reloaded.none { it.id == activeIdFor(role) }) {
+                    (reloaded.firstOrNull { it.role == role } ?: reloaded.firstOrNull())?.let {
+                        setActiveId(role, it.id)
+                    }
+                }
+            },
+            onAddVariant = { messageEditorTarget = MessageEditorTarget(role, variantId = "", isNew = true) }
+        )
     }
 
     if (!onboardingDone) {
@@ -356,27 +439,14 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 when (modal) {
                     AccessibilityModal.NONE -> when (tab) {
                         AccessibilityTab.HOME -> {
-                        val homeStatusInput = HomeServiceStatusInput(
-                            bridgeEnabled = bridgingEnabled,
-                            whatsappMode = if (askBeforeSend) {
-                                MissedCallWhatsAppMode.PREPARED_MANUAL
-                            } else {
-                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
-                            },
-                            primaryChannel = settings.primaryChannel,
-                            whatsappAvailable = whatsappAvailability.selectedPackage != null,
-                            smsFallbackEnabled = smsFallback,
-                            readPhoneStateGranted = phoneStateGranted,
-                            readCallLogGranted = callLogGranted,
-                            detectorEnabled = callDetectionPreferences.isEnabled(),
-                            autoSendConsentGranted = whatsAppAutoSendController.isAccessibilityServiceEnabled(),
-                            hasTemplate = templates.isNotEmpty()
-                        )
                         val missedTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.MISSED_CALL, selectedMissedId
                         )
                         val endedTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.CALL_ENDED, selectedEndedId
+                        )
+                        val noAnswerTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.NO_ANSWER_OUTGOING, selectedNoAnswerId
                         )
                         val homeWarning = HomeWarningLogic.warningFor(
                             HomeWarningState(
@@ -386,19 +456,40 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 profileEmpty = signaturePreview.isBlank()
                             )
                         )
+                        // C1 status banner — computed from the same real signals: service enabled +
+                        // master on, both call permissions, and battery-optimization exemption.
+                        val powerManager = context.getSystemService(android.os.PowerManager::class.java)
+                        val batteryExempt = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+                        val bannerDisplay = HomeStatusBannerLogic.compute(
+                            HomeStatusBannerInput(
+                                serviceRunning = bridgingEnabled && callDetectionPreferences.isEnabled(),
+                                phoneStatePermissionGranted = phoneStateGranted,
+                                callLogPermissionGranted = callLogGranted,
+                                batteryOptimizationExempt = batteryExempt
+                            )
+                        )
+                        val cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
+                            card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
+                                .joinToString("") { it.take(1) }.ifBlank { "דל" }
+                        }
+                        val cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" }
                         HomeScreen(
                             warning = homeWarning,
-                            missedEnabled = bridgingEnabled,
+                            bannerState = bannerDisplay.state,
+                            bannerText = bannerDisplay.text,
+                            masterEnabled = bridgingEnabled,
+                            missedEnabled = missedMomentEnabled,
+                            endedEnabled = endedMomentEnabled,
+                            noAnswerEnabled = noAnswerMomentEnabled,
                             missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             endedBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            noAnswerBody = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
                             cardAttached = cardAttached,
-                            cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
-                                card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
-                                    .joinToString("") { it.take(1) }.ifBlank { "דל" }
-                            },
-                            cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" },
-                            onToggleEnabled = {
+                            cardInitials = cardInitials,
+                            cardLine1 = cardLine1,
+                            onBannerClick = { modal = AccessibilityModal.SETUP },
+                            onToggleMaster = {
                                 if (bridgingEnabled) {
                                     settings.isEnabled = false
                                     callDetectionPreferences.setEnabled(false)
@@ -409,8 +500,21 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                     modal = AccessibilityModal.SETUP
                                 }
                             },
+                            onToggleMissed = {
+                                missedMomentEnabled = !missedMomentEnabled
+                                settings.missedMomentEnabled = missedMomentEnabled
+                            },
+                            onToggleEnded = {
+                                endedMomentEnabled = !endedMomentEnabled
+                                settings.endedMomentEnabled = endedMomentEnabled
+                            },
+                            onToggleNoAnswer = {
+                                noAnswerMomentEnabled = !noAnswerMomentEnabled
+                                settings.noAnswerMomentEnabled = noAnswerMomentEnabled
+                            },
                             onOpenMissedJourney = { modal = AccessibilityModal.MISSED_JOURNEY },
                             onOpenEndedJourney = { modal = AccessibilityModal.ENDED_JOURNEY },
+                            onOpenNoAnswerJourney = { modal = AccessibilityModal.NO_ANSWER_JOURNEY },
                             // The ⚠️ leads to whichever fix it is about: an empty profile opens the
                             // card editor, anything else opens the enable/permissions flow.
                             onResolveWarning = {
@@ -517,6 +621,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                     selectedMissedId = template.id
                                     settings.selectedMissedTemplateId = template.id
                                 }
+                                TemplateRole.NO_ANSWER_OUTGOING -> {
+                                    selectedNoAnswerId = template.id
+                                    settings.selectedNoAnswerTemplateId = template.id
+                                }
                             }
                         },
                         onSaveTemplate = { template ->
@@ -581,24 +689,18 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             templates, TemplateRole.MISSED_CALL, selectedMissedId
                         )
                         MissedJourneyScreen(
-                            isEnabled = bridgingEnabled,
+                            isEnabled = missedMomentEnabled,
                             missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
                             recipientLabel = recipientScopeLabel(recipientScope),
                             askBeforeSend = askBeforeSend,
                             channelLabel = channelLabel(selectedChannel),
+                            variants = momentVariantsFor(TemplateRole.MISSED_CALL),
                             onToggleEnabled = {
-                                if (bridgingEnabled) {
-                                    settings.isEnabled = false
-                                    callDetectionPreferences.setEnabled(false)
-                                    bridgingEnabled = false
-                                    applyCallDetectionServiceState(appContext, bridgeEnabled = false, phoneStateGranted, callLogGranted)
-                                    diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
-                                } else {
-                                    modal = AccessibilityModal.SETUP
-                                }
+                                // Per-moment toggle for the missed moment (Part C2).
+                                missedMomentEnabled = !missedMomentEnabled
+                                settings.missedMomentEnabled = missedMomentEnabled
                             },
-                            onEditMessage = { messageEditorTarget = TemplateRole.MISSED_CALL },
                             onEditRecipient = { recipientPickerOpen = true },
                             onEditAskBeforeSend = { askPickerOpen = true },
                             onEditChannel = { channelPickerOpen = true },
@@ -619,11 +721,32 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             cardAttached = cardAttached,
                             scopeLabel = endedScopeLabel(endedScope),
                             channelLabel = channelLabel(selectedChannel),
-                            onEditMessage = { messageEditorTarget = TemplateRole.CALL_ENDED },
+                            variants = momentVariantsFor(TemplateRole.CALL_ENDED),
                             onEditCard = { cardEditorOpen = true },
                             onToggleCardAttached = {
                                 cardAttached = !cardAttached
                                 endedCardSettings.cardAttached = cardAttached
+                            },
+                            onEditScope = { endedScopePickerOpen = true },
+                            onEditChannel = { channelPickerOpen = true },
+                            onBack = { modal = AccessibilityModal.NONE }
+                        )
+                    }
+
+                    AccessibilityModal.NO_ANSWER_JOURNEY -> {
+                        val noAnswerTemplate = TemplateRoleSelector.forRole(
+                            templates, TemplateRole.NO_ANSWER_OUTGOING, selectedNoAnswerId
+                        )
+                        NoAnswerJourneyScreen(
+                            isEnabled = noAnswerMomentEnabled,
+                            body = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            signature = signaturePreview,
+                            scopeLabel = endedScopeLabel(endedScope),
+                            channelLabel = channelLabel(selectedChannel),
+                            variants = momentVariantsFor(TemplateRole.NO_ANSWER_OUTGOING),
+                            onToggleEnabled = {
+                                noAnswerMomentEnabled = !noAnswerMomentEnabled
+                                settings.noAnswerMomentEnabled = noAnswerMomentEnabled
                             },
                             onEditScope = { endedScopePickerOpen = true },
                             onEditChannel = { channelPickerOpen = true },
@@ -685,6 +808,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         templates = templates,
                         selectedEndedId = selectedEndedId,
                         selectedMissedId = selectedMissedId,
+                        selectedNoAnswerId = selectedNoAnswerId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
                         primaryChannel = settings.primaryChannel,
                         whatsappAvailable = whatsappAvailability.selectedPackage != null,
@@ -695,25 +819,26 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 }
                 }
 
-                // Wiring Pass step 1: the message/reminder editor, opened from a journey screen.
-                // Edits the template *body* only — links (card/website) stay in their own fields, so
-                // MessageComposition keeps appending them once (editing the composed text would bake
-                // the links into the body and duplicate them on the next send).
-                messageEditorTarget?.let { role ->
-                    val editingId = when (role) {
-                        TemplateRole.MISSED_CALL -> selectedMissedId
-                        TemplateRole.CALL_ENDED -> selectedEndedId
-                    }
-                    val editingTemplate = TemplateRoleSelector.forRole(templates, role, editingId)
-                    if (editingTemplate == null) {
+                // Part B: the per-variant message editor, opened from a moment's edit screen.
+                // Edits the variant *body* only — links (card/website) stay in their own fields, so
+                // MessageComposition keeps appending them once. A blank/new target creates a fresh
+                // variant for the role (and becomes the active one on save).
+                messageEditorTarget?.let { target ->
+                    val role = target.role
+                    val editingTemplate = if (target.isNew) null else templates.firstOrNull { it.id == target.variantId }
+                    // An edit target whose variant vanished (deleted elsewhere) just closes.
+                    if (!target.isNew && editingTemplate == null) {
                         messageEditorTarget = null
                     } else {
                         val isReminder = role == TemplateRole.CALL_ENDED
                         MessageEditorScreen(
                             isEnded = isReminder,
-                            body = editingTemplate.body,
+                            body = editingTemplate?.body.orEmpty(),
                             signature = signaturePreview,
                             cardAttached = cardAttached,
+                            titleOverride = if (role == TemplateRole.NO_ANSWER_OUTGOING) "לא ענו" else null,
+                            // The vCard/delay toggles belong to the ended moment only.
+                            showCardToggle = role == TemplateRole.CALL_ENDED,
                             cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
                                 card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
                                     .joinToString("") { it.take(1) }.ifBlank { "דל" }
@@ -724,7 +849,29 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 endedCardSettings.cardAttached = cardAttached
                             },
                             onSave = { newBody ->
-                                templateStore.saveTemplate(editingTemplate.copy(body = newBody))
+                                if (editingTemplate != null) {
+                                    templateStore.saveTemplate(editingTemplate.copy(body = newBody))
+                                } else {
+                                    // New variant: title mirrors the role default's title; becomes active.
+                                    val added = templateStore.addTemplate(
+                                        title = templateRoleLabel(role),
+                                        body = newBody,
+                                        role = role
+                                    )
+                                    if (added != null) {
+                                        when (role) {
+                                            TemplateRole.MISSED_CALL -> {
+                                                selectedMissedId = added.id; settings.selectedMissedTemplateId = added.id
+                                            }
+                                            TemplateRole.CALL_ENDED -> {
+                                                selectedEndedId = added.id; settings.selectedEndedTemplateId = added.id
+                                            }
+                                            TemplateRole.NO_ANSWER_OUTGOING -> {
+                                                selectedNoAnswerId = added.id; settings.selectedNoAnswerTemplateId = added.id
+                                            }
+                                        }
+                                    }
+                                }
                                 templates = templateStore.loadTemplates()
                                 messageEditorTarget = null
                             },
@@ -976,6 +1123,99 @@ private fun JourneySectionLabel(text: String) {
     )
 }
 
+/**
+ * Part B — the up-to-5 message-variant list for one moment. The user picks ONE active variant
+ * (radio-style); the active variant is exactly what gets sent (not random / round-robin). Each row
+ * can be edited or deleted; "הוסף נוסח" adds one until the cap of 5.
+ *
+ * The variants ARE the role's templates in the store; the active id is the moment's stored
+ * selection. This reuses the existing template store rather than adding a parallel model.
+ */
+@Composable
+private fun VariantListSection(
+    variants: List<MessageTemplate>,
+    activeId: String,
+    canAdd: Boolean,
+    onSelectActive: (String) -> Unit,
+    onEditVariant: (String) -> Unit,
+    onDeleteVariant: (String) -> Unit,
+    onAddVariant: () -> Unit
+) {
+    val colors = AccessibilityExtra.colors
+    AppCard(cornerRadius = 20) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+            variants.forEachIndexed { index, variant ->
+                val isActive = variant.id == activeId
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectActive(variant.id) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        if (isActive) AccessibilityIcons.RadioChecked else AccessibilityIcons.RadioUnchecked,
+                        contentDescription = if (isActive) "נוסח פעיל" else "בחר נוסח",
+                        tint = if (isActive) colors.primary else AccessibilityColors.UnselectedIcon,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = variant.body.trim().ifBlank { "(נוסח ריק)" },
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 2,
+                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isActive) colors.textStrong else colors.textBody,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        AccessibilityIcons.Edit,
+                        contentDescription = "ערוך נוסח",
+                        tint = colors.primary,
+                        modifier = Modifier.size(19.dp).clickable { onEditVariant(variant.id) }
+                    )
+                    // The last remaining variant of a moment cannot be deleted — a moment must
+                    // always keep one message to send.
+                    if (variants.size > 1) {
+                        Icon(
+                            AccessibilityIcons.Delete,
+                            contentDescription = "מחק נוסח",
+                            tint = colors.danger,
+                            modifier = Modifier.size(19.dp).clickable { onDeleteVariant(variant.id) }
+                        )
+                    }
+                }
+                if (index != variants.lastIndex) {
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F0F0)))
+                }
+            }
+            if (canAdd) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onAddVariant)
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(AccessibilityIcons.Add, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    Text("הוסף נוסח", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "הגעת ל-5 נוסחים (המקסימום)",
+                    fontSize = 12.sp,
+                    color = colors.textMuted,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
 // Wiring Pass: a minimal single-choice picker used by the journey rows (recipient scope, ask-
 // before-send). Options are (value, label) pairs; picking one calls onSelect and closes. Design is
 // intentionally throwaway — the UI is scheduled to be re-skinned; this just makes the choice work.
@@ -1022,8 +1262,8 @@ private fun MissedJourneyScreen(
     recipientLabel: String,
     askBeforeSend: Boolean,
     channelLabel: String,
+    variants: MomentVariants,
     onToggleEnabled: () -> Unit,
-    onEditMessage: () -> Unit,
     onEditRecipient: () -> Unit,
     onEditAskBeforeSend: () -> Unit,
     onEditChannel: () -> Unit,
@@ -1046,13 +1286,23 @@ private fun MissedJourneyScreen(
             onToggle = onToggleEnabled
         )
 
-        // 2 — the message itself, dimmed when off so the screen shows what is actually happening.
+        // 2 — the ACTIVE variant exactly as it will be sent (dimmed when off), then the full
+        // up-to-5 variant list where the user picks which one is active (Part B).
         JourneySectionLabel("ההודעה")
         MessageWithSignaturePreview(
             body = missedBody,
             signature = signature,
             dimmed = !isEnabled,
-            onEditBody = onEditMessage
+            onEditBody = { variants.onEditVariant(variants.activeId) }
+        )
+        VariantListSection(
+            variants = variants.variants,
+            activeId = variants.activeId,
+            canAdd = variants.canAdd,
+            onSelectActive = variants.onSelectActive,
+            onEditVariant = variants.onEditVariant,
+            onDeleteVariant = variants.onDeleteVariant,
+            onAddVariant = variants.onAddVariant
         )
         if (!isEnabled) {
             JourneyQuietLine("לקוחות שלא נענו לא יקבלו הודעה.")
@@ -1177,7 +1427,7 @@ private fun EndedJourneyScreen(
     cardAttached: Boolean,
     scopeLabel: String,
     channelLabel: String,
-    onEditMessage: () -> Unit,
+    variants: MomentVariants,
     onEditCard: () -> Unit,
     onToggleCardAttached: () -> Unit,
     onEditScope: () -> Unit,
@@ -1193,16 +1443,26 @@ private fun EndedJourneyScreen(
     ) {
         ModalHeader(title = "אחרי שדיברנו", onBack = onBack)
 
-        // 1+2 — the follow-up message with the card sitting inside it, exactly as it will arrive.
-        // The card is part of the message, so it is shown inside the same bubble, not beside it.
+        // 1+2 — the ACTIVE variant with the card sitting inside it, exactly as it will arrive, then
+        // the up-to-5 variant list (Part B). The card is part of the message, so it is shown inside
+        // the same bubble, not beside it.
         JourneySectionLabel("הודעת ההמשך")
         EndedMessagePreview(
             body = reminderBody,
             card = card,
             cardAttached = cardAttached,
-            onEditBody = onEditMessage,
+            onEditBody = { variants.onEditVariant(variants.activeId) },
             onEditCard = onEditCard,
             onToggleCardAttached = onToggleCardAttached
+        )
+        VariantListSection(
+            variants = variants.variants,
+            activeId = variants.activeId,
+            canAdd = variants.canAdd,
+            onSelectActive = variants.onSelectActive,
+            onEditVariant = variants.onEditVariant,
+            onDeleteVariant = variants.onDeleteVariant,
+            onAddVariant = variants.onAddVariant
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -1216,6 +1476,65 @@ private fun EndedJourneyScreen(
         )
         // 4 — the channel, a separate setting from the missed moment's.
         JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
+    }
+}
+
+// ===================== SCREEN 4 — "לא ענו" (Part A) =====================
+// The outgoing-not-answered moment: I called a client who did not pick up. MANUAL approve — the
+// send happens from the follow-up notification (edit-before-send), never automatically. Styled like
+// the missed journey: a per-moment toggle, the active variant preview, the variant list, and the
+// scope/channel result rows it shares with the ended moment.
+@Composable
+private fun NoAnswerJourneyScreen(
+    isEnabled: Boolean,
+    body: String,
+    signature: String,
+    scopeLabel: String,
+    channelLabel: String,
+    variants: MomentVariants,
+    onToggleEnabled: () -> Unit,
+    onEditScope: () -> Unit,
+    onEditChannel: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        ModalHeader(title = "לא ענו", onBack = onBack)
+
+        JourneySwitchRow(label = "פועל", checked = isEnabled, onToggle = onToggleEnabled)
+
+        JourneySectionLabel("ההודעה")
+        MessageWithSignaturePreview(
+            body = body,
+            signature = signature,
+            dimmed = !isEnabled,
+            onEditBody = { variants.onEditVariant(variants.activeId) }
+        )
+        VariantListSection(
+            variants = variants.variants,
+            activeId = variants.activeId,
+            canAdd = variants.canAdd,
+            onSelectActive = variants.onSelectActive,
+            onEditVariant = variants.onEditVariant,
+            onDeleteVariant = variants.onDeleteVariant,
+            onAddVariant = variants.onAddVariant
+        )
+        if (!isEnabled) {
+            JourneyQuietLine("לא תישלח הודעה למי שלא ענה לך.")
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        JourneyResultRow(title = "אחרי אילו שיחות להציע לשלוח?", value = scopeLabel, onClick = onEditScope)
+        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
+
+        Spacer(modifier = Modifier.height(2.dp))
+        JourneyQuietLine("ההודעה נשלחת רק אחרי אישור שלך.")
     }
 }
 
@@ -1339,39 +1658,50 @@ private fun EndedMessagePreview(
 @Composable
 private fun HomeScreen(
     warning: HomeWarning?,
+    bannerState: HomeStatusBannerState,
+    bannerText: String,
+    masterEnabled: Boolean,
     missedEnabled: Boolean,
+    endedEnabled: Boolean,
+    noAnswerEnabled: Boolean,
     missedBody: String,
     endedBody: String,
+    noAnswerBody: String,
     signature: String,
     cardAttached: Boolean,
     cardInitials: String,
     cardLine1: String,
-    onToggleEnabled: () -> Unit,
+    onBannerClick: () -> Unit,
+    onToggleMaster: () -> Unit,
+    onToggleMissed: () -> Unit,
+    onToggleEnded: () -> Unit,
+    onToggleNoAnswer: () -> Unit,
     onOpenMissedJourney: () -> Unit,
     onOpenEndedJourney: () -> Unit,
+    onOpenNoAnswerJourney: () -> Unit,
     onResolveWarning: () -> Unit,
     onOpenSystemSettings: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
+    // C4 compact: tighter screen padding and inter-block spacing than before (was 16 / 12).
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header — greeting + ⚙️ (HOME.html .header). ⚙️ is present but not part of
-        // navigation — 95% of the time nobody needs it.
+        // Header — greeting + ⚙️ (HOME.html .header).
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.heading)
+                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = colors.heading)
                 Text(
                     "מערכת הפולואפ פעילה",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = colors.textMuted
                 )
@@ -1387,62 +1717,37 @@ private fun HomeScreen(
                     contentDescription = "הגדרות מערכת",
                     tint = colors.textMuted,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(40.dp)
                         .clickable(onClick = onOpenSystemSettings)
-                        .padding(11.dp)
+                        .padding(10.dp)
                 )
             }
         }
 
-        // Shown only when something is actually broken; otherwise Home stays silent.
+        // C1 (1) — STATUS BANNER. Status only, never a switch: teal when the system is running with
+        // permissions + battery OK; warning (tappable → fix) when something is missing.
+        HomeStatusBanner(state = bannerState, text = bannerText, onClick = onBannerClick)
+
+        // Shown only when something (else) is actually broken; otherwise Home stays silent.
         warning?.let {
             HomeWarningRow(text = HomeWarningLogic.message(it), onClick = onResolveWarning)
         }
 
-        // Master toggle card (HOME.html .master-card) — the real bridging on/off switch.
-        // USER OVERRIDE #2: background recolored from the HTML's dark near-black gradient to the
-        // support page's teal health-banner gradient, so it reads as "system running properly".
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = Color.Transparent,
-            shadowElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E))))
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("מצב אוטומטי", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Text(
-                        if (missedEnabled) "האפליקציה עובדת ברקע" else "כבוי — לקוחות לא יקבלו הודעה",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 13.sp
-                    )
-                }
-                Switch(checked = missedEnabled, onCheckedChange = { onToggleEnabled() })
-            }
-        }
+        // C1 (2) — MASTER TOGGLE. The real global gate over all three moments (→ isEnabled).
+        HomeMasterToggleRow(checked = masterEnabled, onToggle = onToggleMaster)
 
-        // USER OVERRIDE #1: stats-grid ("לקוחות ניצלו היום"=4, "הודעות נשלחו השבוע"=12) deleted
-        // entirely — removed, not placeholdered — so master-card and message cards sit together.
+        Text("ההודעות שלך", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = colors.heading)
 
-        Text("ההודעות שלך", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = colors.heading)
-
-        // Home is a mirror: each card shows the real message, not a sentence about it.
+        // C2 — three moment cards, identical style. Each: quick per-moment toggle where the old
+        // "עריכה" pill was, whole card tappable → edit, dimmed + non-tappable when its toggle is off.
         HomeMomentCard(
             emoji = "📞",
             title = "אם לא עניתי",
             body = missedBody,
             signature = signature,
-            dimmed = !missedEnabled,
-            footnote = if (missedEnabled) null else "לקוחות שלא נענו לא יקבלו הודעה",
+            enabled = missedEnabled,
             card = null,
+            onToggle = onToggleMissed,
             onOpen = onOpenMissedJourney
         )
 
@@ -1451,11 +1756,109 @@ private fun HomeScreen(
             title = "אחרי שדיברנו",
             body = endedBody,
             signature = "",
-            dimmed = false,
-            footnote = null,
+            enabled = endedEnabled,
             card = if (cardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            onToggle = onToggleEnded,
             onOpen = onOpenEndedJourney
         )
+
+        HomeMomentCard(
+            emoji = "📵",
+            title = "לא ענו",
+            body = noAnswerBody,
+            signature = signature,
+            enabled = noAnswerEnabled,
+            card = null,
+            onToggle = onToggleNoAnswer,
+            onOpen = onOpenNoAnswerJourney
+        )
+    }
+}
+
+/**
+ * C1 status banner — STATUS ONLY (not a switch). Teal health-banner styling when active (support
+ * page gradient + a pulse ring around the ✓), warning amber and tappable when something is missing.
+ */
+@Composable
+private fun HomeStatusBanner(state: HomeStatusBannerState, text: String, onClick: () -> Unit) {
+    val active = state == HomeStatusBannerState.ACTIVE
+    // Gentle pulse ring around the status glyph — matches the support health-banner feel.
+    val pulse = rememberInfiniteTransition(label = "banner-pulse")
+    val ringAlpha by pulse.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.05f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
+        label = "ring-alpha"
+    )
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(20.dp))
+        .then(
+            if (active) {
+                Modifier.background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E))))
+            } else {
+                Modifier.background(Color(0xFFF59E0B))
+            }
+        )
+        .then(if (active) Modifier else Modifier.clickable(onClick = onClick))
+        .padding(horizontal = 16.dp, vertical = 14.dp)
+    Row(
+        modifier = rowModifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = if (active) ringAlpha else 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(if (active) "✓" else "!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        }
+        Text(
+            text = text,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            modifier = Modifier.weight(1f)
+        )
+        if (!active) {
+            Icon(
+                AccessibilityIcons.ChevronStart,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/** C1 master toggle row — a real switch over all three moments (maps to the global isEnabled). */
+@Composable
+private fun HomeMasterToggleRow(checked: Boolean, onToggle: () -> Unit) {
+    val colors = AccessibilityExtra.colors
+    AppCard(cornerRadius = 18, background = colors.surface) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("שליחת הודעות המשך", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = colors.textStrong)
+                Text(
+                    if (checked) "פעיל לכל המצבים" else "כבוי — לא תישלח אף הודעה",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.textMuted
+                )
+            }
+            Switch(checked = checked, onCheckedChange = { onToggle() })
+        }
     }
 }
 
@@ -1510,50 +1913,44 @@ private fun HomeMomentCard(
     title: String,
     body: String,
     signature: String,
-    dimmed: Boolean,
-    footnote: String?,
+    enabled: Boolean,
     card: HomeCardPreview?,
+    onToggle: () -> Unit,
     onOpen: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
-    val alpha = if (dimmed) 0.45f else 1f
-    AppCard(cornerRadius = 24, background = colors.surface) {
+    // C2 — off = dimmed to ~0.45 and NOT tappable (the toggle itself stays interactive).
+    val alpha = if (enabled) 1f else 0.45f
+    AppCard(cornerRadius = 20, background = colors.surface) {
         Column {
-            // config-header: icon + title + "עריכה" (HOME.html .config-header)
+            // config-header: icon + title + the per-moment quick toggle (where "עריכה" used to be).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(text = emoji, fontSize = 19.sp)
-                    Text(text = title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = colors.textStrong)
-                }
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = colors.primaryContainer,
-                    modifier = Modifier.clickable(onClick = onOpen)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(text = emoji, fontSize = 17.sp, modifier = Modifier.alpha(alpha))
                     Text(
-                        "עריכה",
-                        color = colors.primary,
+                        text = title,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        fontSize = 15.sp,
+                        color = colors.textStrong.copy(alpha = alpha)
                     )
                 }
+                Switch(checked = enabled, onCheckedChange = { onToggle() })
             }
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F0F0)))
 
-            // chat-preview-zone: realistic bubble, matching the WhatsApp look exactly.
+            // chat-preview-zone: realistic bubble. Tappable → edit ONLY while enabled (C2).
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFFEFEAE2))
-                    .clickable(onClick = onOpen)
-                    .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .then(if (enabled) Modifier.clickable(onClick = onOpen) else Modifier)
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Surface(
                     shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
@@ -1561,21 +1958,21 @@ private fun HomeMomentCard(
                     shadowElevation = 1.dp,
                     modifier = Modifier.fillMaxWidth(0.9f)
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
                         Text(
                             text = body.ifBlank { " " },
                             color = colors.textStrong.copy(alpha = alpha),
-                            fontSize = 15.sp,
-                            lineHeight = 21.sp,
-                            maxLines = 4
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            maxLines = 3
                         )
                         if (signature.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(5.dp))
                             Text(
                                 text = signature,
                                 color = colors.textMuted.copy(alpha = alpha),
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
                                 maxLines = 1
                             )
                         }
@@ -1626,15 +2023,6 @@ private fun HomeMomentCard(
                     }
                 }
             }
-
-            footnote?.let {
-                Text(
-                    text = it,
-                    fontSize = 13.sp,
-                    color = colors.textMuted,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-            }
         }
     }
 }
@@ -1662,6 +2050,7 @@ private fun TemplateRoleToggle(
             val label = when (role) {
                 TemplateRole.MISSED_CALL -> "שיחה שלא נענתה"
                 TemplateRole.CALL_ENDED -> "סיום שיחה"
+                TemplateRole.NO_ANSWER_OUTGOING -> "לא ענו"
             }
             Surface(
                 shape = RoundedCornerShape(10.dp),
@@ -1907,6 +2296,7 @@ private fun TemplatesScreen(
 private fun templateRoleLabel(role: TemplateRole): String = when (role) {
     TemplateRole.MISSED_CALL -> "שיחה שלא נענתה"
     TemplateRole.CALL_ENDED -> "סיום שיחה"
+    TemplateRole.NO_ANSWER_OUTGOING -> "לא ענו"
 }
 
 @Composable
@@ -2076,6 +2466,7 @@ private fun MissedCallPromptScreen(
     templates: List<MessageTemplate>,
     selectedEndedId: String,
     selectedMissedId: String,
+    selectedNoAnswerId: String,
     preferredWhatsAppPackage: String,
     primaryChannel: MissedCallResponsePrimaryChannel,
     whatsappAvailable: Boolean,
@@ -2091,10 +2482,18 @@ private fun MissedCallPromptScreen(
         ContactCard.fromProfile(MyDetailsStore(context.applicationContext).load()).isComplete
     }
     // Wording follows the call scenario: a missed call uses the "missed" cards, a completed
-    // call the "call ended" cards.
-    val role = if (mode == FollowUpPromptMode.MISSED_CALL) TemplateRole.MISSED_CALL else TemplateRole.CALL_ENDED
+    // call the "call ended" cards, an outgoing-not-answered call the "לא ענו" cards (Part A).
+    val role = when (mode) {
+        FollowUpPromptMode.MISSED_CALL -> TemplateRole.MISSED_CALL
+        FollowUpPromptMode.NO_ANSWER_OUTGOING -> TemplateRole.NO_ANSWER_OUTGOING
+        FollowUpPromptMode.CALL_ENDED -> TemplateRole.CALL_ENDED
+    }
     val roleTemplates = templates.filter { it.role == role }
-    val selectedIdForRole = if (role == TemplateRole.MISSED_CALL) selectedMissedId else selectedEndedId
+    val selectedIdForRole = when (role) {
+        TemplateRole.MISSED_CALL -> selectedMissedId
+        TemplateRole.NO_ANSWER_OUTGOING -> selectedNoAnswerId
+        TemplateRole.CALL_ENDED -> selectedEndedId
+    }
     // Manual "ask me" mode with more than one card of this role lets the user pick a different
     // card for this send only (it does not change the saved default).
     val showSelector = askBeforeSend && roleTemplates.size > 1
@@ -2122,8 +2521,10 @@ private fun MissedCallPromptScreen(
     val channelResolution = remember(primaryChannel, whatsappAvailable) {
         FollowUpChannelResolver.resolve(primaryChannel, whatsappAvailable)
     }
-    val isMissed = mode == FollowUpPromptMode.MISSED_CALL
-    val showContactCard = !isMissed
+    // No conversation happened on a missed or a no-answer call, so both use the missed layout:
+    // a generic bubble with editing behind a button, and no completed-call contact-card add-on.
+    val isMissed = mode == FollowUpPromptMode.MISSED_CALL || mode == FollowUpPromptMode.NO_ANSWER_OUTGOING
+    val showContactCard = mode == FollowUpPromptMode.CALL_ENDED
     val missingNumber = isMissed && normalizedPhone == null
     // "אפשרויות נוספות" offers the other channel for this one send.
     var showMoreOptions by remember { mutableStateOf(false) }
@@ -2174,7 +2575,7 @@ private fun MissedCallPromptScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         IconBadge(
-            icon = if (mode == FollowUpPromptMode.MISSED_CALL) AccessibilityIcons.PhoneMissed else AccessibilityIcons.PhoneInTalk,
+            icon = if (mode == FollowUpPromptMode.CALL_ENDED) AccessibilityIcons.PhoneInTalk else AccessibilityIcons.PhoneMissed,
             background = AccessibilityColors.PrimaryContainer,
             tint = AccessibilityColors.Primary,
             boxSize = 92,

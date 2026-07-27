@@ -15,12 +15,16 @@ package com.followupnadlan.templates
 object SprintOneTemplates {
     const val ENDED_ID = "followup_ended"
     const val MISSED_ID = "followup_missed"
+    const val NO_ANSWER_ID = "followup_no_answer"
 
     /** Fresh-install default for completed calls. */
     const val DEFAULT_ID = ENDED_ID
 
     /** Fresh-install default for missed calls. */
     const val DEFAULT_MISSED_ID = MISSED_ID
+
+    /** Fresh-install default for outgoing calls the client did not answer. */
+    const val DEFAULT_NO_ANSWER_ID = NO_ANSWER_ID
 
     val ended = MessageTemplate(
         id = ENDED_ID,
@@ -36,5 +40,13 @@ object SprintOneTemplates {
         body = "תודה שהתקשרת, אני כרגע לא פנוי. אחזור אליך ברגע שאתפנה."
     )
 
-    val all = listOf(ended, missed)
+    /** Outgoing call I made, client did not pick up (Part A default text). */
+    val noAnswer = MessageTemplate(
+        id = NO_ANSWER_ID,
+        title = "לא ענו",
+        role = TemplateRole.NO_ANSWER_OUTGOING,
+        body = "ניסיתי להתקשר ולא ענית, אשמח שתחזור אליי 🙏"
+    )
+
+    val all = listOf(ended, missed, noAnswer)
 }

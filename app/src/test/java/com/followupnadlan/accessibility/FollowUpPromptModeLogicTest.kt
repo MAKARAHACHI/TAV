@@ -25,8 +25,15 @@ class FollowUpPromptModeLogicTest {
     }
 
     @Test
+    fun noAnswerTypeIsNoAnswerMode() {
+        assertEquals(FollowUpPromptMode.NO_ANSWER_OUTGOING, FollowUpPromptModeLogic.fromCallType("no_answer"))
+        assertEquals(FollowUpPromptMode.NO_ANSWER_OUTGOING, FollowUpPromptModeLogic.fromCallType(" NO_ANSWER "))
+    }
+
+    @Test
     fun titlesMatchEachMode() {
         assertEquals("שיחה שלא נענתה", FollowUpPromptModeLogic.title(FollowUpPromptMode.MISSED_CALL))
         assertEquals("סיום שיחה", FollowUpPromptModeLogic.title(FollowUpPromptMode.CALL_ENDED))
+        assertEquals("לא ענו לך", FollowUpPromptModeLogic.title(FollowUpPromptMode.NO_ANSWER_OUTGOING))
     }
 }

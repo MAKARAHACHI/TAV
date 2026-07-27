@@ -11,7 +11,10 @@ enum class TemplateRole {
     MISSED_CALL,
 
     /** Call that ended normally (answered incoming or outgoing). */
-    CALL_ENDED
+    CALL_ENDED,
+
+    /** Outgoing call I made that the client did not answer (duration 0 / no connect). */
+    NO_ANSWER_OUTGOING
 }
 
 data class MessageTemplate(

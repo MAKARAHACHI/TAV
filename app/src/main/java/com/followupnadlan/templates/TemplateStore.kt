@@ -20,7 +20,13 @@ class TemplateStore(context: Context) {
     fun loadTemplates(): List<MessageTemplate> {
         val raw = preferences.getString(KEY_TEMPLATES, null)
         if (raw != null) {
-            return TemplateCodec.decode(raw).ifEmpty { seed(SprintOneTemplates.all) }
+            val decoded = TemplateCodec.decode(raw).ifEmpty { return seed(SprintOneTemplates.all) }
+            // A role added after this install was first stored (e.g. NO_ANSWER_OUTGOING) is not in
+            // the persisted list; seed its default once so the moment always has a variant. Existing
+            // roles/bodies are never touched.
+            val ensured = TemplateListLogic.ensureRoleDefaults(decoded, SprintOneTemplates.all)
+            if (ensured.size != decoded.size) persist(ensured)
+            return ensured
         }
         return migrateFromLegacy()
     }
@@ -30,14 +36,20 @@ class TemplateStore(context: Context) {
         persist(TemplateListLogic.upsert(loadTemplates(), template))
     }
 
-    /** Appends a new template with a fresh id and returns it. */
+    /**
+     * Appends a new template with a fresh id and returns it — unless the role is already at the
+     * [TemplateListLogic.MAX_VARIANTS_PER_ROLE] cap (Part B), in which case nothing is added and
+     * null is returned.
+     */
     fun addTemplate(
         title: String,
         body: String,
         cardLink: String = "",
         websiteLink: String = "",
         role: TemplateRole = TemplateRole.CALL_ENDED
-    ): MessageTemplate {
+    ): MessageTemplate? {
+        val current = loadTemplates()
+        if (!TemplateListLogic.canAddForRole(current, role)) return null
         val template = MessageTemplate(
             id = UUID.randomUUID().toString(),
             title = title,
@@ -46,7 +58,7 @@ class TemplateStore(context: Context) {
             websiteLink = websiteLink,
             role = role
         )
-        persist(loadTemplates() + template)
+        persist(current + template)
         return template
     }
 
@@ -54,6 +66,22 @@ class TemplateStore(context: Context) {
     fun deleteTemplate(id: String) {
         persist(TemplateListLogic.delete(loadTemplates(), id))
     }
+
+    /**
+     * Part B: removes a variant but always keeps at least one message *for that moment's role*, so
+     * a moment can never be left with no message to send.
+     */
+    fun deleteVariant(id: String) {
+        persist(TemplateListLogic.deleteWithinRole(loadTemplates(), id))
+    }
+
+    /** Part B: whether another variant may be added for [role] (max-5 cap). */
+    fun canAddVariant(role: TemplateRole): Boolean =
+        TemplateListLogic.canAddForRole(loadTemplates(), role)
+
+    /** Part B: how many variants a role currently holds. */
+    fun variantCount(role: TemplateRole): Int =
+        TemplateListLogic.countForRole(loadTemplates(), role)
 
     private fun migrateFromLegacy(): List<MessageTemplate> {
         val oldBodiesById = SprintOneTemplates.all.associate { template ->
@@ -78,16 +106,22 @@ class TemplateStore(context: Context) {
             .commit()
     }
 
-    private companion object {
-        const val PREFERENCES_NAME = "message_templates"
-        const val KEY_TEMPLATES = "templates"
+    companion object {
+        /** Part B: maximum message variants per moment (role). */
+        const val MAX_VARIANTS_PER_ROLE = TemplateListLogic.MAX_VARIANTS_PER_ROLE
 
-        fun legacyBodyKey(templateId: String): String = "template_body_$templateId"
+        private const val PREFERENCES_NAME = "message_templates"
+        private const val KEY_TEMPLATES = "templates"
+
+        private fun legacyBodyKey(templateId: String): String = "template_body_$templateId"
     }
 }
 
 /** Pure add/edit/delete list operations, kept separate for tests. */
 internal object TemplateListLogic {
+    /** Part B: at most this many message variants per moment (role). */
+    const val MAX_VARIANTS_PER_ROLE = 5
+
     fun upsert(templates: List<MessageTemplate>, template: MessageTemplate): List<MessageTemplate> =
         if (templates.any { it.id == template.id }) {
             templates.map { if (it.id == template.id) template else it }
@@ -98,6 +132,38 @@ internal object TemplateListLogic {
     /** Deletes by id, but never removes the last remaining template. */
     fun delete(templates: List<MessageTemplate>, id: String): List<MessageTemplate> =
         if (templates.size <= 1) templates else templates.filterNot { it.id == id }
+
+    /**
+     * Deletes by id but never removes the last remaining variant *of that role* — each moment must
+     * always keep at least one message. Other roles are untouched.
+     */
+    fun deleteWithinRole(templates: List<MessageTemplate>, id: String): List<MessageTemplate> {
+        val target = templates.firstOrNull { it.id == id } ?: return templates
+        val sameRoleCount = templates.count { it.role == target.role }
+        if (sameRoleCount <= 1) return templates
+        return templates.filterNot { it.id == id }
+    }
+
+    /** How many variants a given role currently holds. */
+    fun countForRole(templates: List<MessageTemplate>, role: TemplateRole): Int =
+        templates.count { it.role == role }
+
+    /** Whether another variant may be added for [role] (Part B max-5 cap). */
+    fun canAddForRole(templates: List<MessageTemplate>, role: TemplateRole): Boolean =
+        countForRole(templates, role) < MAX_VARIANTS_PER_ROLE
+
+    /**
+     * Appends any [defaults] whose role has no variant yet in [templates]. Used to seed a role
+     * added after an install was first stored, without disturbing existing variants.
+     */
+    fun ensureRoleDefaults(
+        templates: List<MessageTemplate>,
+        defaults: List<MessageTemplate>
+    ): List<MessageTemplate> {
+        val presentRoles = templates.map { it.role }.toSet()
+        val missing = defaults.filter { it.role !in presentRoles }
+        return if (missing.isEmpty()) templates else templates + missing
+    }
 }
 
 /**

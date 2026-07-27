@@ -91,10 +91,18 @@ class TemplateStoreTest {
     }
 
     @Test
-    fun freshInstallDefaultsAreEndedAndMissed() {
+    fun freshInstallDefaultsAreEndedMissedAndNoAnswer() {
         assertEquals(SprintOneTemplates.ENDED_ID, SprintOneTemplates.DEFAULT_ID)
         assertEquals(SprintOneTemplates.MISSED_ID, SprintOneTemplates.DEFAULT_MISSED_ID)
-        assertEquals(2, SprintOneTemplates.all.size)
+        assertEquals(SprintOneTemplates.NO_ANSWER_ID, SprintOneTemplates.DEFAULT_NO_ANSWER_ID)
+        assertEquals(3, SprintOneTemplates.all.size)
+    }
+
+    @Test
+    fun defaultNoAnswerTemplateIsOutgoingNotAnsweredCopy() {
+        val template = SprintOneTemplates.all.first { it.id == SprintOneTemplates.NO_ANSWER_ID }
+        assertEquals(TemplateRole.NO_ANSWER_OUTGOING, template.role)
+        assertEquals("ניסיתי להתקשר ולא ענית, אשמח שתחזור אליי 🙏", template.body)
     }
 
     @Test

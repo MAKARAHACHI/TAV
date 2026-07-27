@@ -57,6 +57,8 @@ internal fun MessageEditorScreen(
     cardAttached: Boolean,
     cardInitials: String = "דל",
     cardLine1: String = "דני לוי",
+    titleOverride: String? = null,
+    showCardToggle: Boolean = true,
     onToggleCardAttached: (() -> Unit)?,
     onSave: (String) -> Unit,
     onBack: () -> Unit
@@ -80,7 +82,7 @@ internal fun MessageEditorScreen(
                 modifier = Modifier.size(24.dp).clickable(onClick = onBack)
             )
             Text(
-                if (isEnded) "🤝 אחרי שדיברנו" else "אם לא עניתי",
+                titleOverride ?: if (isEnded) "🤝 אחרי שדיברנו" else "אם לא עניתי",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 16.sp,
                 color = AccessibilityColors.Heading
@@ -210,31 +212,33 @@ internal fun MessageEditorScreen(
                     }
                 }
 
-                AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
-                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                        if (isEnded) {
-                            EditorToggleRow(
-                                emoji = "📇",
-                                title = "לצרף כרטיס ביקור (vCard)",
-                                description = "שולח איש קשר לשמירה מהירה בטלפון",
-                                checked = cardAttached,
-                                onToggle = onToggleCardAttached
-                            )
-                            EditorToggleRow(
-                                emoji = "⏳",
-                                title = "השהיית שליחה קלה",
-                                description = "ממתין 2 דקות לפני השליחה כדי להרגיש טבעי יותר",
-                                checked = delaySend,
-                                onToggle = { delaySend = !delaySend }
-                            )
-                        } else {
-                            EditorToggleRow(
-                                emoji = "📇",
-                                title = "כרטיס ביקור (vCard)",
-                                description = "מצרף איש קשר לשמירה מהירה",
-                                checked = cardAttached,
-                                onToggle = onToggleCardAttached
-                            )
+                if (showCardToggle) {
+                    AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
+                        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                            if (isEnded) {
+                                EditorToggleRow(
+                                    emoji = "📇",
+                                    title = "לצרף כרטיס ביקור (vCard)",
+                                    description = "שולח איש קשר לשמירה מהירה בטלפון",
+                                    checked = cardAttached,
+                                    onToggle = onToggleCardAttached
+                                )
+                                EditorToggleRow(
+                                    emoji = "⏳",
+                                    title = "השהיית שליחה קלה",
+                                    description = "ממתין 2 דקות לפני השליחה כדי להרגיש טבעי יותר",
+                                    checked = delaySend,
+                                    onToggle = { delaySend = !delaySend }
+                                )
+                            } else {
+                                EditorToggleRow(
+                                    emoji = "📇",
+                                    title = "כרטיס ביקור (vCard)",
+                                    description = "מצרף איש קשר לשמירה מהירה",
+                                    checked = cardAttached,
+                                    onToggle = onToggleCardAttached
+                                )
+                            }
                         }
                     }
                 }

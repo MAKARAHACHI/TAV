@@ -31,6 +31,41 @@ class MissedCallAutoResponseSettings(context: Context) {
             preferences.edit().putString(KEY_MISSED_TEMPLATE_ID, value).commit()
         }
 
+    /**
+     * Active variant for the "לא ענו" moment (outgoing call the client did not answer — Part A).
+     * Falls back to the fresh-install no-answer default.
+     */
+    var selectedNoAnswerTemplateId: String
+        get() = preferences.getString(KEY_NO_ANSWER_TEMPLATE_ID, null) ?: SprintOneTemplates.DEFAULT_NO_ANSWER_ID
+        set(value) {
+            preferences.edit().putString(KEY_NO_ANSWER_TEMPLATE_ID, value).commit()
+        }
+
+    /**
+     * Per-moment enable for the missed-incoming moment. The global [isEnabled] master gate still
+     * governs everything; this is the per-card toggle from Home (Part C2). Defaults on so existing
+     * behaviour is unchanged.
+     */
+    var missedMomentEnabled: Boolean
+        get() = preferences.getBoolean(KEY_MISSED_MOMENT_ENABLED, true)
+        set(value) {
+            preferences.edit().putBoolean(KEY_MISSED_MOMENT_ENABLED, value).apply()
+        }
+
+    /** Per-moment enable for the ended moment (Part C2). Defaults on. */
+    var endedMomentEnabled: Boolean
+        get() = preferences.getBoolean(KEY_ENDED_MOMENT_ENABLED, true)
+        set(value) {
+            preferences.edit().putBoolean(KEY_ENDED_MOMENT_ENABLED, value).apply()
+        }
+
+    /** Per-moment enable for the "לא ענו" outgoing moment (Part A / C2). Defaults on. */
+    var noAnswerMomentEnabled: Boolean
+        get() = preferences.getBoolean(KEY_NO_ANSWER_MOMENT_ENABLED, true)
+        set(value) {
+            preferences.edit().putBoolean(KEY_NO_ANSWER_MOMENT_ENABLED, value).apply()
+        }
+
     var primaryChannel: MissedCallResponsePrimaryChannel
         get() = preferences.getString(KEY_PRIMARY_CHANNEL, null)
             ?.let { runCatching { MissedCallResponsePrimaryChannel.valueOf(it) }.getOrNull() }
@@ -86,6 +121,10 @@ class MissedCallAutoResponseSettings(context: Context) {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_TEMPLATE_ID = "template_id"
         private const val KEY_MISSED_TEMPLATE_ID = "missed_template_id"
+        private const val KEY_NO_ANSWER_TEMPLATE_ID = "no_answer_template_id"
+        private const val KEY_MISSED_MOMENT_ENABLED = "missed_moment_enabled"
+        private const val KEY_ENDED_MOMENT_ENABLED = "ended_moment_enabled"
+        private const val KEY_NO_ANSWER_MOMENT_ENABLED = "no_answer_moment_enabled"
         private const val KEY_PRIMARY_CHANNEL = "primary_channel"
         private const val KEY_WHATSAPP_MODE = "whatsapp_mode"
         private const val KEY_WHATSAPP_AUTOMATION_ENABLED = "whatsapp_automation_enabled"

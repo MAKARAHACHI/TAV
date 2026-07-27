@@ -24,11 +24,14 @@ import com.followupnadlan.accessibility.EndedScopeSettings
 import com.followupnadlan.accessibility.FollowUpCooldownSettings
 import com.followupnadlan.accessibility.LocalMomentResolver
 import com.followupnadlan.accessibility.WorkingHoursDecider
+import com.followupnadlan.accessibility.FollowUpPromptModeLogic
 import com.followupnadlan.accessibility.WorkingHoursSettings
 import com.followupnadlan.missedcall.ContactVerifier
 import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
+import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.notifications.EndedSuggestionNotificationHelper
 import com.followupnadlan.notifications.FollowUpFailureNotificationHelper
+import com.followupnadlan.notifications.FollowUpNotificationHelper
 
 class CallDetectionService : Service() {
     private lateinit var monitor: CallStateMonitor
@@ -109,7 +112,9 @@ class CallDetectionService : Service() {
 
         val suggestionStore = EndedSuggestionStore(context)
         val contactVerifier = ContactVerifier(context)
-        // Every call qualifies: incoming or outgoing, answered or not. The decider owns the rules.
+        // The scope / cooldown / working-hours gate is identical for both after-call moments, so
+        // the verified ENDED decider owns it for both. Part A adds NO_ANSWER *alongside* — this
+        // decider's rules are unchanged.
         val cooldowns = FollowUpCooldownSettings(context)
         val decision = EndedSuggestionDecider.decide(
             EndedSuggestionInput(
@@ -132,6 +137,27 @@ class CallDetectionService : Service() {
         )
         if (decision != EndedSuggestionDecision.SUGGEST) return
 
+        val settings = MissedCallAutoResponseSettings(context)
+        // Which after-call moment is this? An outgoing call with zero duration never connected.
+        when (EndedMomentClassifier.classify(latestCall.type, latestCall.durationSeconds)) {
+            EndedMoment.NO_ANSWER_OUTGOING -> offerNoAnswer(context, phone, now, suggestionStore, settings)
+            EndedMoment.ENDED -> offerEnded(context, phone, now, latestCall, suggestionStore, settings)
+        }
+    }
+
+    /** The existing ENDED moment (answered calls, unanswered incoming). Behaviour unchanged. */
+    private fun offerEnded(
+        context: Context,
+        phone: String,
+        now: Long,
+        latestCall: LatestCallLogEntry,
+        suggestionStore: EndedSuggestionStore,
+        settings: MissedCallAutoResponseSettings
+    ) {
+        // Per-moment enable (Part C2). The service only runs while the master isEnabled is on, so
+        // the master gate is already applied by the service lifecycle.
+        if (!settings.endedMomentEnabled) return
+
         val message = EndedFollowUpMessage.build(context)
         if (message.isBlank()) return
 
@@ -142,6 +168,33 @@ class CallDetectionService : Service() {
             displayName = displayName,
             message = message,
             wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L
+        )
+        suggestionStore.markSuggested(phone, now)
+    }
+
+    /**
+     * Part A — the "לא ענו" moment: I called a client who did not pick up. MANUAL approve only, so
+     * it opens the follow-up prompt (edit-before-send) rather than the one-tap ended send. The
+     * message is the active NO_ANSWER_OUTGOING variant (text + signature, no vCard file-attach).
+     */
+    private fun offerNoAnswer(
+        context: Context,
+        phone: String,
+        now: Long,
+        suggestionStore: EndedSuggestionStore,
+        settings: MissedCallAutoResponseSettings
+    ) {
+        if (!settings.noAnswerMomentEnabled) return
+
+        val message = NoAnswerFollowUpMessage.build(context)
+        if (message.isBlank()) return
+
+        val displayName = ContactNameResolver(context).resolveFirstName(phone).orEmpty()
+        FollowUpNotificationHelper(context).showFollowUpNotification(
+            phone = phone,
+            leadName = displayName,
+            templateId = settings.selectedNoAnswerTemplateId,
+            callType = FollowUpPromptModeLogic.CALL_TYPE_NO_ANSWER
         )
         suggestionStore.markSuggested(phone, now)
     }

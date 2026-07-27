@@ -35,6 +35,60 @@ class TemplateListLogicTest {
         assertEquals(single, TemplateListLogic.delete(single, "only"))
     }
 
+    private fun roleTemplate(id: String, role: TemplateRole) =
+        MessageTemplate(id = id, title = "t-$id", body = "b", role = role)
+
+    @Test
+    fun canAddForRoleStopsAtFive() {
+        val ended = (1..5).map { roleTemplate("e$it", TemplateRole.CALL_ENDED) }
+        // Five ended variants → cannot add a sixth of that role.
+        assertTrue(!TemplateListLogic.canAddForRole(ended, TemplateRole.CALL_ENDED))
+        // But another role is unaffected by the ended count.
+        assertTrue(TemplateListLogic.canAddForRole(ended, TemplateRole.MISSED_CALL))
+        // Four is still under the cap.
+        assertTrue(TemplateListLogic.canAddForRole(ended.take(4), TemplateRole.CALL_ENDED))
+    }
+
+    @Test
+    fun countForRoleCountsOnlyThatRole() {
+        val mixed = listOf(
+            roleTemplate("e1", TemplateRole.CALL_ENDED),
+            roleTemplate("e2", TemplateRole.CALL_ENDED),
+            roleTemplate("m1", TemplateRole.MISSED_CALL),
+            roleTemplate("n1", TemplateRole.NO_ANSWER_OUTGOING)
+        )
+        assertEquals(2, TemplateListLogic.countForRole(mixed, TemplateRole.CALL_ENDED))
+        assertEquals(1, TemplateListLogic.countForRole(mixed, TemplateRole.NO_ANSWER_OUTGOING))
+    }
+
+    @Test
+    fun deleteWithinRoleKeepsLastOfThatRoleButDeletesWhenOthersExist() {
+        val list = listOf(
+            roleTemplate("e1", TemplateRole.CALL_ENDED),
+            roleTemplate("e2", TemplateRole.CALL_ENDED),
+            roleTemplate("m1", TemplateRole.MISSED_CALL)
+        )
+        // Two ended → one can go.
+        assertEquals(listOf("e1", "m1"), TemplateListLogic.deleteWithinRole(list, "e2").map { it.id })
+        // The single missed variant is protected even though the whole list has 3 entries.
+        assertEquals(list, TemplateListLogic.deleteWithinRole(list, "m1"))
+    }
+
+    @Test
+    fun ensureRoleDefaultsSeedsOnlyMissingRoles() {
+        val existing = listOf(
+            roleTemplate("e1", TemplateRole.CALL_ENDED),
+            roleTemplate("m1", TemplateRole.MISSED_CALL)
+        )
+        val defaults = listOf(
+            roleTemplate("de", TemplateRole.CALL_ENDED),
+            roleTemplate("dn", TemplateRole.NO_ANSWER_OUTGOING)
+        )
+        val result = TemplateListLogic.ensureRoleDefaults(existing, defaults)
+        // The NO_ANSWER default is appended; the already-present CALL_ENDED default is not.
+        assertEquals(listOf("e1", "m1", "dn"), result.map { it.id })
+    }
+
     @Test
     fun codecRoundTripPreservesAllFieldsIncludingLinksAndSeparators() {
         val templates = listOf(
