@@ -1028,8 +1028,8 @@ private fun MissedJourneyScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         ModalHeader(title = "אם לא עניתי", onBack = onBack)
 
@@ -1183,8 +1183,8 @@ private fun EndedJourneyScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         ModalHeader(title = "אחרי שדיברנו", onBack = onBack)
 
@@ -1352,8 +1352,8 @@ private fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Header — greeting + ⚙️ (HOME.html .header). ⚙️ is present but not part of
         // navigation — 95% of the time nobody needs it.
@@ -1363,7 +1363,7 @@ private fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = colors.heading)
+                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.heading)
                 Text(
                     "מערכת הפולואפ פעילה",
                     fontSize = 14.sp,
@@ -1404,7 +1404,7 @@ private fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
+                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -1422,7 +1422,7 @@ private fun HomeScreen(
         }
 
         // Stats — not-wired example numbers (plan v2 §3: no DB-backed counters yet).
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             HomeStatBox(value = "4", label = "לקוחות ניצלו היום", modifier = Modifier.weight(1f))
             HomeStatBox(value = "12", label = "הודעות נשלחו השבוע", modifier = Modifier.weight(1f))
         }
@@ -1461,7 +1461,7 @@ private fun HomeStatBox(value: String, label: String, modifier: Modifier = Modif
     val colors = AccessibilityExtra.colors
     AppCard(modifier = modifier, cornerRadius = 20) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(value, fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = colors.primary)
+            Text(value, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp, color = colors.primary)
             Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = colors.textMuted)
         }
     }
@@ -1572,7 +1572,7 @@ private fun HomeMomentCard(
                             text = body.ifBlank { " " },
                             color = colors.textStrong.copy(alpha = alpha),
                             fontSize = 15.sp,
-                            lineHeight = 22.sp,
+                            lineHeight = 21.sp,
                             maxLines = 4
                         )
                         if (signature.isNotBlank()) {

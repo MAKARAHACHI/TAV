@@ -1,6 +1,5 @@
 package com.followupnadlan.accessibility
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -27,8 +26,8 @@ import com.followupnadlan.R
  */
 object AccessibilityColors {
     // Light
-    val ScreenBackground = Color(0xFFFFFFFF)
-    val ScreenBackgroundAlt = Color(0xFFEEF3F9)
+    val ScreenBackground = Color(0xFFF7F9FA)
+    val ScreenBackgroundAlt = Color(0xFFF7F9FA)
     val Surface = Color(0xFFFFFFFF)
     val SubtleSurface = Color(0xFFF8F9FB)
     val CardBorder = Color(0xFFEEF3F9)
@@ -41,25 +40,25 @@ object AccessibilityColors {
     val Green = Color(0xFF17B3A3)
     val GreenBright = Color(0xFF17B3A3)
     val GreenCheck = Color(0xFF34B7F1)
-    val GreenContainer = Color(0xFFE6F7DF)
-    val GreenSurface = Color(0xFFE6F7DF)
+    val GreenContainer = Color(0xFFE1F7CB)
+    val GreenSurface = Color(0xFFE1F7CB)
 
-    val Heading = Color(0xFF16241B)
-    val TextStrong = Color(0xFF16241B)
-    val TextBody = Color(0xB316241B)
-    val TextMuted = Color(0x8C16241B)
-    val TextFaint = Color(0x6616241B)
+    val Heading = Color(0xFF111B21)
+    val TextStrong = Color(0xFF111B21)
+    val TextBody = Color(0xFF3B4A54)
+    val TextMuted = Color(0xFF667781)
+    val TextFaint = Color(0xFF8A97A0)
 
     val Danger = Color(0xFFE6483C)
     val Warning = Color(0xFFE6483C)
-    val UnselectedIcon = Color(0x6616241B)
+    val UnselectedIcon = Color(0xFF8A97A0)
     val IconDark = Color(0xFF16241B)
 
     // New tokens not previously named (segmented control / field backgrounds / list rows)
     val FieldGrey = Color(0xFFF2F4F7)
     val ListBg = Color(0xFFF8F9FB)
     val PickerBg = Color(0xFFEEF1F4)
-    val BubbleGreen = Color(0xFFE6F7DF)
+    val BubbleGreen = Color(0xFFE1F7CB)
     val WaCheck = Color(0xFF34B7F1)
     val DangerBg = Color(0xFFFFE0D6)
 
@@ -238,7 +237,8 @@ private val AccessibilityShapes = Shapes(
 
 @Composable
 fun AccessibilityTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    // MVP-1: light only, regardless of system setting — dark mode is MVP-2.
+    val dark = false
     val colorScheme = if (dark) DarkColorScheme else LightColorScheme
     val extendedColors = if (dark) DarkExtendedColors else LightExtendedColors
 
