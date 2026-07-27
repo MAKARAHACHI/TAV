@@ -32,4 +32,10 @@ object NoAnswerFollowUpMessage {
             attachCard = EndedCardSettings(context).cardAttached
         )
     }
+
+    /**
+     * Log [FollowUpLogEntry.source] tag for the "לא ענו" moment, so HistoryFeed and the home
+     * today-count can tell a no-answer send apart from the ended send it shares a path with.
+     */
+    const val SOURCE = "no_answer_follow_up"
 }

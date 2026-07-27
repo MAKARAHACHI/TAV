@@ -6,8 +6,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -50,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -70,6 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.followupnadlan.followuplog.FollowUpLogStore
@@ -456,27 +461,20 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 profileEmpty = signaturePreview.isBlank()
                             )
                         )
-                        // C1 status banner — computed from the same real signals: service enabled +
-                        // master on, both call permissions, and battery-optimization exemption.
-                        val powerManager = context.getSystemService(android.os.PowerManager::class.java)
-                        val batteryExempt = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
-                        val bannerDisplay = HomeStatusBannerLogic.compute(
-                            HomeStatusBannerInput(
-                                serviceRunning = bridgingEnabled && callDetectionPreferences.isEnabled(),
-                                phoneStatePermissionGranted = phoneStateGranted,
-                                callLogPermissionGranted = callLogGranted,
-                                batteryOptimizationExempt = batteryExempt
-                            )
-                        )
                         val cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
                             card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
                                 .joinToString("") { it.take(1) }.ifBlank { "דל" }
                         }
                         val cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" }
+                        // Greeting first name from the real profile; falls back to "דני" when empty.
+                        val greetingName = ContactCard.fromProfile(myDetailsStore.load()).fullName
+                            .trim().split(" ").firstOrNull { it.isNotBlank() } ?: "דני"
+                        // VALUE BADGE N — real today-count from the FollowUp action log (WIRING C).
+                        val todayCount = HomeTodayCount.of(logStore.load())
                         HomeScreen(
+                            greetingName = greetingName,
+                            todayCount = todayCount,
                             warning = homeWarning,
-                            bannerState = bannerDisplay.state,
-                            bannerText = bannerDisplay.text,
                             masterEnabled = bridgingEnabled,
                             missedEnabled = missedMomentEnabled,
                             endedEnabled = endedMomentEnabled,
@@ -488,7 +486,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             cardAttached = cardAttached,
                             cardInitials = cardInitials,
                             cardLine1 = cardLine1,
-                            onBannerClick = { modal = AccessibilityModal.SETUP },
                             onToggleMaster = {
                                 if (bridgingEnabled) {
                                     settings.isEnabled = false
@@ -1657,9 +1654,9 @@ private fun EndedMessagePreview(
 // are being sent (§2).
 @Composable
 private fun HomeScreen(
+    greetingName: String,
+    todayCount: Int,
     warning: HomeWarning?,
-    bannerState: HomeStatusBannerState,
-    bannerText: String,
     masterEnabled: Boolean,
     missedEnabled: Boolean,
     endedEnabled: Boolean,
@@ -1671,7 +1668,6 @@ private fun HomeScreen(
     cardAttached: Boolean,
     cardInitials: String,
     cardLine1: String,
-    onBannerClick: () -> Unit,
     onToggleMaster: () -> Unit,
     onToggleMissed: () -> Unit,
     onToggleEnded: () -> Unit,
@@ -1683,7 +1679,19 @@ private fun HomeScreen(
     onOpenSystemSettings: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
-    // C4 compact: tighter screen padding and inter-block spacing than before (was 16 / 12).
+    // Which accordion cards are currently open. Missed (0) opens by default; multiple may be open
+    // at once — the HTML JS only flips the tapped card's own state, never force-closing the others.
+    val openCards = remember { mutableStateListOf(0) }
+    fun toggleOpen(index: Int) {
+        if (openCards.contains(index)) openCards.remove(index) else openCards.add(index)
+    }
+
+    // Master OFF ⇒ every card reads as off: dimmed + not sending. Master ON ⇒ each card follows its
+    // own per-moment toggle. (Kill-switch semantics, plan A.)
+    val missedActive = masterEnabled && missedEnabled
+    val endedActive = masterEnabled && endedEnabled
+    val noAnswerActive = masterEnabled && noAnswerEnabled
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1691,170 +1699,140 @@ private fun HomeScreen(
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header — greeting + ⚙️ (HOME.html .header).
+        // Header — greeting + value badge (left column) + ⚙️ (HOME.html .header).
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("שלום, דני 👋", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = colors.heading)
                 Text(
-                    "מערכת הפולואפ פעילה",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = colors.textMuted
+                    "שלום, $greetingName 👋",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 19.sp,
+                    color = colors.heading
                 )
+                // VALUE BADGE — teal pill, real today-count N (WIRING C). Shown even when N == 0.
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF17B3A3).copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = "✨ טיפלנו ב-$todayCount לקוחות היום!",
+                        color = Color(0xFF17B3A3),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
             }
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = colors.surface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEAEAEA)),
-                shadowElevation = 2.dp
-            ) {
-                Icon(
-                    AccessibilityIcons.Settings,
-                    contentDescription = "הגדרות מערכת",
-                    tint = colors.textMuted,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable(onClick = onOpenSystemSettings)
-                        .padding(10.dp)
-                )
-            }
+            Icon(
+                AccessibilityIcons.Settings,
+                contentDescription = "הגדרות מערכת",
+                tint = colors.textMuted,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenSystemSettings)
+                    .padding(4.dp)
+                    .size(24.dp)
+            )
         }
 
-        // C1 (1) — STATUS BANNER. Status only, never a switch: teal when the system is running with
-        // permissions + battery OK; warning (tappable → fix) when something is missing.
-        HomeStatusBanner(state = bannerState, text = bannerText, onClick = onBannerClick)
+        // MASTER CARD — the single dark gradient card with the real master kill-switch (WIRING A).
+        // Replaces the previous pass's separate teal status-banner + "שליחת הודעות המשך" row.
+        HomeMasterCard(checked = masterEnabled, onToggle = onToggleMaster)
 
-        // Shown only when something (else) is actually broken; otherwise Home stays silent.
+        // Shown only when something is actually broken; otherwise Home stays silent. Not in the
+        // HTML, but §2 honesty: a broken bridge the user is unaware of is a false "messages sent".
         warning?.let {
             HomeWarningRow(text = HomeWarningLogic.message(it), onClick = onResolveWarning)
         }
 
-        // C1 (2) — MASTER TOGGLE. The real global gate over all three moments (→ isEnabled).
-        HomeMasterToggleRow(checked = masterEnabled, onToggle = onToggleMaster)
+        Text("התרחישים שלך (3)", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = colors.heading)
 
-        Text("ההודעות שלך", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = colors.heading)
-
-        // C2 — three moment cards, identical style. Each: quick per-moment toggle where the old
-        // "עריכה" pill was, whole card tappable → edit, dimmed + non-tappable when its toggle is off.
-        HomeMomentCard(
+        // THREE ACCORDION CARDS. Tap header = expand/collapse; quick-toggle = per-moment enable
+        // (no expand); edit button = navigate; dimmed when off (master or per-moment).
+        HomeAccordionCard(
             emoji = "📞",
             title = "אם לא עניתי",
             body = missedBody,
             signature = signature,
+            time = "10:42",
             enabled = missedEnabled,
+            active = missedActive,
+            open = openCards.contains(0),
             card = null,
+            onHeaderClick = { toggleOpen(0) },
             onToggle = onToggleMissed,
-            onOpen = onOpenMissedJourney
+            onEdit = onOpenMissedJourney
         )
 
-        HomeMomentCard(
+        HomeAccordionCard(
             emoji = "🤝",
             title = "אחרי שדיברנו",
             body = endedBody,
             signature = "",
+            time = "11:05",
             enabled = endedEnabled,
+            active = endedActive,
+            open = openCards.contains(1),
             card = if (cardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            onHeaderClick = { toggleOpen(1) },
             onToggle = onToggleEnded,
-            onOpen = onOpenEndedJourney
+            onEdit = onOpenEndedJourney
         )
 
-        HomeMomentCard(
+        HomeAccordionCard(
             emoji = "📵",
-            title = "לא ענו",
+            title = "לא ענו לי",
             body = noAnswerBody,
             signature = signature,
+            time = "12:30",
             enabled = noAnswerEnabled,
+            active = noAnswerActive,
+            open = openCards.contains(2),
             card = null,
+            onHeaderClick = { toggleOpen(2) },
             onToggle = onToggleNoAnswer,
-            onOpen = onOpenNoAnswerJourney
+            onEdit = onOpenNoAnswerJourney
         )
     }
 }
 
 /**
- * C1 status banner — STATUS ONLY (not a switch). Teal health-banner styling when active (support
- * page gradient + a pulse ring around the ✓), warning amber and tappable when something is missing.
+ * MASTER CARD — dark gradient card (HOME.html .master-card) carrying the real master kill-switch.
+ * Title "זיהוי שיחות פועל ✔", teal subtitle, and the switch (→ global isEnabled). Master OFF dims
+ * all three accordion cards and stops all sending (handled by the caller via `active` flags).
  */
 @Composable
-private fun HomeStatusBanner(state: HomeStatusBannerState, text: String, onClick: () -> Unit) {
-    val active = state == HomeStatusBannerState.ACTIVE
-    // Gentle pulse ring around the status glyph — matches the support health-banner feel.
-    val pulse = rememberInfiniteTransition(label = "banner-pulse")
-    val ringAlpha by pulse.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.05f,
-        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
-        label = "ring-alpha"
-    )
-    val rowModifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(20.dp))
-        .then(
-            if (active) {
-                Modifier.background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E))))
-            } else {
-                Modifier.background(Color(0xFFF59E0B))
-            }
-        )
-        .then(if (active) Modifier else Modifier.clickable(onClick = onClick))
-        .padding(horizontal = 16.dp, vertical = 14.dp)
-    Row(
-        modifier = rowModifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+private fun HomeMasterCard(checked: Boolean, onToggle: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        shadowElevation = 6.dp,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = if (active) ringAlpha else 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(if (active) "✓" else "!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        }
-        Text(
-            text = text,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
-            modifier = Modifier.weight(1f)
-        )
-        if (!active) {
-            Icon(
-                AccessibilityIcons.ChevronStart,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/** C1 master toggle row — a real switch over all three moments (maps to the global isEnabled). */
-@Composable
-private fun HomeMasterToggleRow(checked: Boolean, onToggle: () -> Unit) {
-    val colors = AccessibilityExtra.colors
-    AppCard(cornerRadius = 18, background = colors.surface) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
+                .background(Brush.linearGradient(listOf(Color(0xFF111B21), Color(0xFF1E2D24))))
                 .clickable(onClick = onToggle)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 20.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("שליחת הודעות המשך", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = colors.textStrong)
                 Text(
-                    if (checked) "פעיל לכל המצבים" else "כבוי — לא תישלח אף הודעה",
-                    fontSize = 12.sp,
+                    "זיהוי שיחות פועל ✔",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "הודעות המשך יישלחו אוטומטית",
+                    color = Color(0xFF17B3A3),
                     fontWeight = FontWeight.Medium,
-                    color = colors.textMuted
+                    fontSize = 13.sp
                 )
             }
             Switch(checked = checked, onCheckedChange = { onToggle() })
@@ -1901,124 +1879,195 @@ private fun HomeWarningRow(text: String, onClick: () -> Unit) {
 }
 
 /**
- * A home moment card: the moment's name, and beneath it the actual message a client receives.
+ * Accordion moment card (HOME.html .accordion-card). Collapsed: emoji + {bold title + one-line
+ * ellipsized snippet of the active message} + quick-toggle + chevron-in-circle. Tapping the header
+ * expands/collapses this card; the chevron rotates 180° and turns primary-blue when open, and the
+ * snippet hides. The quick-toggle flips per-moment enable WITHOUT expanding. When off (per-moment
+ * OR master) the card dims (opacity 0.5 + grayscale-ish) but stays tappable-to-expand and its
+ * toggle stays interactive.
  *
- * Deliberately carries no explanatory subtitle, no state label and no counters — the message is
- * the thing itself, and a sentence describing it would only compete with it. Tapping zooms into
- * the same artifact, larger and editable.
+ * @param enabled the per-moment toggle position (what the switch shows / persists).
+ * @param active whether the moment actually sends now = master ON && enabled. Drives the dimming so
+ *   master-off dims every card even though each per-moment switch keeps its own position.
  */
 @Composable
-private fun HomeMomentCard(
+private fun HomeAccordionCard(
     emoji: String,
     title: String,
     body: String,
     signature: String,
+    time: String,
     enabled: Boolean,
+    active: Boolean,
+    open: Boolean,
     card: HomeCardPreview?,
+    onHeaderClick: () -> Unit,
     onToggle: () -> Unit,
-    onOpen: () -> Unit
+    onEdit: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
-    // C2 — off = dimmed to ~0.45 and NOT tappable (the toggle itself stays interactive).
-    val alpha = if (enabled) 1f else 0.45f
-    AppCard(cornerRadius = 20, background = colors.surface) {
-        Column {
-            // config-header: icon + title + the per-moment quick toggle (where "עריכה" used to be).
+    // Dim mirrors the HTML .disabled rule (opacity 0.5 + slight grayscale). Approximated by alpha
+    // on the content (Compose has no cheap grayscale filter); the card stays tappable to expand.
+    val dimAlpha = if (active) 1f else 0.5f
+    val chevronRotation by animateFloatAsState(if (open) 180f else 0f, label = "chevron-rot")
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = colors.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x0A000000)),
+        shadowElevation = 3.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+    ) {
+        Column(modifier = Modifier.alpha(dimAlpha)) {
+            // card-header — always visible; tapping it expands/collapses this card.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .clickable(onClick = onHeaderClick)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(text = emoji, fontSize = 17.sp, modifier = Modifier.alpha(alpha))
-                    Text(
-                        text = title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = colors.textStrong.copy(alpha = alpha)
-                    )
-                }
-                Switch(checked = enabled, onCheckedChange = { onToggle() })
-            }
-            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F0F0)))
-
-            // chat-preview-zone: realistic bubble. Tappable → edit ONLY while enabled (C2).
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFEFEAE2))
-                    .then(if (enabled) Modifier.clickable(onClick = onOpen) else Modifier)
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                    color = colors.bubbleGreen.copy(alpha = alpha),
-                    shadowElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth(0.9f)
+                // card-info: emoji + column of {title, snippet}. Snippet hides while open.
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+                    Text(text = emoji, fontSize = 19.sp)
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = body.ifBlank { " " },
-                            color = colors.textStrong.copy(alpha = alpha),
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
-                            maxLines = 3
+                            text = title,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp,
+                            color = colors.textStrong
                         )
-                        if (signature.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(5.dp))
+                        if (!open) {
                             Text(
-                                text = signature,
-                                color = colors.textMuted.copy(alpha = alpha),
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp,
-                                maxLines = 1
+                                text = body.ifBlank { " " },
+                                fontSize = 13.sp,
+                                color = colors.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 1.dp)
                             )
                         }
+                    }
+                }
+                // card-controls: quick per-moment toggle (no expand) + chevron in a circle.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Switch(checked = enabled, onCheckedChange = { onToggle() })
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(if (open) colors.primary else Color(0xFFF4F6F8)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            AccessibilityIcons.ExpandMore,
+                            contentDescription = if (open) "כווץ" else "הרחב",
+                            tint = if (open) Color.White else colors.textMuted,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(chevronRotation)
+                        )
+                    }
+                }
+            }
 
-                        // vCard-attachment element inside the bubble (HOME.html .vcard-attachment).
-                        // Drawn exactly as designed but not-wired: WhatsApp blocks file-share to an
-                        // unsaved number's chat, so the real send stays text-only (plan v2 §3).
-                        card?.let {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colors.surface)
-                                    .border(1.dp, Color(0x0D000000), RoundedCornerShape(12.dp))
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E)))),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(it.initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(it.line1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = colors.textStrong)
-                                    Text("איש קשר (.vcf)", fontSize = 12.sp, color = colors.textMuted)
-                                }
-                                Icon(
-                                    AccessibilityIcons.ChevronStart,
-                                    contentDescription = null,
-                                    tint = Color(0xFF128C7E),
-                                    modifier = Modifier.size(16.dp)
+            // card-body — chat-bg + WhatsApp bubble + edit button. Shown only when open.
+            if (open) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFEFEAE2))
+                        .padding(horizontal = 18.dp, vertical = 16.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
+                        color = Color(0xFFD9FDD3),
+                        shadowElevation = 1.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Text(
+                                text = body.ifBlank { " " },
+                                color = Color(0xFF111B21),
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp
+                            )
+                            if (signature.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = signature,
+                                    color = Color(0xFF111B21),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
                                 )
                             }
-                        }
 
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("10:42", fontSize = 10.sp, color = Color(0xFF667781))
-                            // ✓✓ static — no WhatsApp delivery-receipt access (plan v2 §3).
-                            Text("✓✓", fontSize = 10.sp, color = AccessibilityColors.WaCheck)
+                            // vCard element inside the ended bubble (HOME.html .vcard). Static /
+                            // not-wired: WhatsApp blocks file-share to an unsaved number's chat.
+                            card?.let {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(colors.surface)
+                                        .border(1.dp, Color(0xFFE9EDEF), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF128C7E)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(it.initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(it.line1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = colors.textStrong)
+                                        Text("איש קשר (.vcf)", fontSize = 12.sp, color = colors.textMuted)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            // meta: timestamp + static ✓✓ (#53bdeb) — no WhatsApp receipt access.
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(time, fontSize = 10.sp, color = Color(0xFF667781))
+                                Text("✓✓", fontSize = 10.sp, color = Color(0xFF53BDEB))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // card-footer-actions: the ONLY route to edit from Home → navigates.
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.surface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.primary.copy(alpha = 0.3f)),
+                            modifier = Modifier.clickable(onClick = onEdit)
+                        ) {
+                            Text(
+                                text = "✏️ עריכת נוסח ההודעה",
+                                color = colors.primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
                         }
                     }
                 }

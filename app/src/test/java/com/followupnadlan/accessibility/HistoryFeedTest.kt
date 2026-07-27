@@ -77,6 +77,38 @@ class HistoryFeedTest {
     }
 
     @Test
+    fun `no-answer-sourced send classifies as no-answer moment`() {
+        val entry = FollowUpLogEntry(
+            actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+            timestampEpochMs = epochMsAt(today, 12, 30),
+            messagePreview = "ניסיתי להתקשר",
+            phone = "972549876543",
+            source = com.followupnadlan.postcall.NoAnswerFollowUpMessage.SOURCE
+        )
+
+        val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+
+        assertEquals(1, rows.size)
+        assertEquals(HistoryMoment.NO_ANSWER, rows[0].moment)
+        assertEquals("נשלחה הודעת \"לא ענו\"", rows[0].summary)
+    }
+
+    @Test
+    fun `ended-sourced send is unaffected by no-answer classification`() {
+        val entry = FollowUpLogEntry(
+            actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+            timestampEpochMs = epochMsAt(today, 12, 30),
+            messagePreview = "",
+            phone = "972549876543",
+            source = "ended_follow_up"
+        )
+
+        val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+
+        assertEquals(HistoryMoment.MISSED, rows[0].moment)
+    }
+
+    @Test
     fun `rows sorted newest first`() {
         val earlier = FollowUpLogEntry(
             actionType = FollowUpActionType.AUTO_SMS_SENT,
