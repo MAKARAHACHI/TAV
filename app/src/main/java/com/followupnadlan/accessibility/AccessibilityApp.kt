@@ -266,6 +266,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val noAnswerScopeSettings = remember(context) { NoAnswerScopeSettings(appContext) }
     val generalScopeSettings = remember(context) { GeneralRecipientScopeSettings(appContext) }
     val endedCardSettings = remember(context) { EndedCardSettings(appContext) }
+    val missedCardSettings = remember(context) { MissedCardSettings(appContext) }
+    val noAnswerCardSettings = remember(context) { NoAnswerCardSettings(appContext) }
     val cooldownSettings = remember(context) { FollowUpCooldownSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
     val workingHoursSettings = remember(context) { WorkingHoursSettings(appContext) }
@@ -325,7 +327,12 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var missedScopeOverride by remember { mutableStateOf(recipientScopeSettings.scopeOverride) }
     var endedScopeOverride by remember { mutableStateOf(endedScopeSettings.scopeOverride) }
     var noAnswerScopeOverride by remember { mutableStateOf(noAnswerScopeSettings.scopeOverride) }
-    var cardAttached by remember { mutableStateOf(endedCardSettings.cardAttached) }
+    // Per-moment card-attached flags. The contact card is an opt-in add/remove control on every
+    // moment (missed / ended / no-answer), default OFF; the flag only governs whether the card
+    // ELEMENT is drawn (still a drawn element only, no real .vcf send — §2).
+    var missedCardAttached by remember { mutableStateOf(missedCardSettings.cardAttached) }
+    var endedCardAttached by remember { mutableStateOf(endedCardSettings.cardAttached) }
+    var noAnswerCardAttached by remember { mutableStateOf(noAnswerCardSettings.cardAttached) }
     // The single explicit channel choice, read back from the engine's flag pair.
     var selectedChannel by remember { mutableStateOf(FollowUpChannelSettings.current(settings)) }
     var smsFallback by remember { mutableStateOf(settings.smsFallbackEnabled) }
@@ -468,6 +475,42 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         }
     }
 
+    // Per-moment resolved card-attached flag (missed / ended / no-answer).
+    fun cardAttachedFor(kind: MomentEditKind): Boolean = when (kind) {
+        MomentEditKind.MISSED -> missedCardAttached
+        MomentEditKind.ENDED -> endedCardAttached
+        MomentEditKind.NO_ANSWER -> noAnswerCardAttached
+    }
+
+    // Shared moment-edit handler: the contact-card add/remove control. Flips the moment's own
+    // attach flag and persists it to that moment's store. Governs whether the card ELEMENT is drawn
+    // in the artifact only — no real .vcf send is wired (§2).
+    fun onMomentToggleCardAttached(kind: MomentEditKind) {
+        when (kind) {
+            MomentEditKind.MISSED -> {
+                missedCardAttached = !missedCardAttached
+                missedCardSettings.cardAttached = missedCardAttached
+            }
+            MomentEditKind.ENDED -> {
+                endedCardAttached = !endedCardAttached
+                endedCardSettings.cardAttached = endedCardAttached
+            }
+            MomentEditKind.NO_ANSWER -> {
+                noAnswerCardAttached = !noAnswerCardAttached
+                noAnswerCardSettings.cardAttached = noAnswerCardAttached
+            }
+        }
+    }
+
+    // Task 3: the inline "רק אנשים שאבחר" preview for a moment. Resolves the effective scope via the
+    // existing EffectiveRecipientScope.of (per-moment override, else the general default). Returns a
+    // pure RecipientPreview only when the effective scope is ONLY_SELECTED; otherwise null (no list).
+    fun selectedPeoplePreviewFor(override: RecipientScope?): RecipientPreview? {
+        val effective = EffectiveRecipientScope.of(override, generalScope)
+        if (effective != RecipientScope.ONLY_SELECTED) return null
+        return RecipientPreviewLogic.summary(allowedRecipientsStore.load().map { it.label })
+    }
+
     val callDetectionPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -552,6 +595,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             // other modal returns to its parent tab (Home). Matches each screen's own onBack.
             modal == AccessibilityModal.HISTORY || modal == AccessibilityModal.SUPPORT ->
                 modal = AccessibilityModal.SYSTEM_SETTINGS
+            // "רק אנשים שאבחר" (ALLOWED_RECIPIENTS) is opened from a moment's audience picker, which
+            // REPLACES the edit-page modal. Back must ALWAYS land on Home, never re-open the edit
+            // page — pinned explicitly here so it stays Home even if modal-stacking ever changes.
+            modal == AccessibilityModal.ALLOWED_RECIPIENTS ->
+                { modal = AccessibilityModal.NONE; recipientsRefresh++ }
             modal != AccessibilityModal.NONE -> { modal = AccessibilityModal.NONE; recipientsRefresh++ }
             tab != AccessibilityTab.HOME -> tab = AccessibilityTab.HOME
         }
@@ -668,7 +716,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             endedBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             noAnswerBody = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
-                            cardAttached = cardAttached,
+                            missedCardAttached = missedCardAttached,
+                            endedCardAttached = endedCardAttached,
+                            noAnswerCardAttached = noAnswerCardAttached,
                             cardInitials = cardInitials,
                             cardLine1 = cardLine1,
                             onToggleMaster = {
@@ -883,6 +933,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
                             scopeOverride = missedScopeOverride,
+                            cardAttached = missedCardAttached,
+                            selectedPeoplePreview = selectedPeoplePreviewFor(missedScopeOverride),
                             variants = momentVariantsFor(TemplateRole.MISSED_CALL),
                             onToggleEnabled = {
                                 missedMomentEnabled = !missedMomentEnabled
@@ -892,6 +944,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.MISSED, it) },
+                            onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.MISSED) },
+                            onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -913,6 +967,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
                             scopeOverride = endedScopeOverride,
+                            cardAttached = endedCardAttached,
+                            selectedPeoplePreview = selectedPeoplePreviewFor(endedScopeOverride),
                             variants = momentVariantsFor(TemplateRole.CALL_ENDED),
                             onToggleEnabled = {
                                 endedMomentEnabled = !endedMomentEnabled
@@ -922,6 +978,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.ENDED, it) },
+                            onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.ENDED) },
+                            onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -943,6 +1001,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
                             scopeOverride = noAnswerScopeOverride,
+                            cardAttached = noAnswerCardAttached,
+                            selectedPeoplePreview = selectedPeoplePreviewFor(noAnswerScopeOverride),
                             variants = momentVariantsFor(TemplateRole.NO_ANSWER_OUTGOING),
                             onToggleEnabled = {
                                 noAnswerMomentEnabled = !noAnswerMomentEnabled
@@ -952,6 +1012,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.NO_ANSWER, it) },
+                            onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.NO_ANSWER) },
+                            onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -1023,7 +1085,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         selectedNoAnswerId = selectedNoAnswerId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
                         signature = signaturePreview,
-                        cardAttached = cardAttached,
+                        missedCardAttached = missedCardAttached,
+                        endedCardAttached = endedCardAttached,
+                        noAnswerCardAttached = noAnswerCardAttached,
                         cardName = ContactCard.fromProfile(myDetailsStore.load()).fullName,
                         onDone = { modal = AccessibilityModal.NONE }
                     )
@@ -1046,7 +1110,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             isEnded = isReminder,
                             body = editingTemplate?.body.orEmpty(),
                             signature = signaturePreview,
-                            cardAttached = cardAttached,
+                            // The card preview inside the editor reflects the ended moment's own
+                            // per-moment card flag (the add/remove control now lives on the edit page).
+                            cardAttached = endedCardAttached,
                             titleOverride = if (role == TemplateRole.NO_ANSWER_OUTGOING) "לא ענו" else null,
                             // The vCard/delay toggles belong to the ended moment only.
                             showCardToggle = role == TemplateRole.CALL_ENDED,
@@ -1056,8 +1122,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             },
                             cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" },
                             onToggleCardAttached = {
-                                cardAttached = !cardAttached
-                                endedCardSettings.cardAttached = cardAttached
+                                endedCardAttached = !endedCardAttached
+                                endedCardSettings.cardAttached = endedCardAttached
                             },
                             onSave = { newBody ->
                                 if (editingTemplate != null) {
@@ -1306,12 +1372,16 @@ private fun MomentEditScreen(
     approvalMode: MomentApprovalMode,
     frequencyLimitOn: Boolean,
     scopeOverride: RecipientScope?,
+    cardAttached: Boolean,
+    selectedPeoplePreview: RecipientPreview?,
     variants: MomentVariants,
     onToggleEnabled: () -> Unit,
     onSelectChannel: (FollowUpChannel) -> Unit,
     onSelectApprovalMode: (MomentApprovalMode) -> Unit,
     onToggleFrequencyLimit: () -> Unit,
     onSelectScope: (RecipientScope?) -> Unit,
+    onToggleCardAttached: () -> Unit,
+    onEditSelectedPeople: () -> Unit,
     onBack: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
@@ -1488,14 +1558,32 @@ private fun MomentEditScreen(
                 // default set in Smart-Rules; any concrete scope is a per-moment override.
                 SettingRow(
                     title = "מי יקבל את ההודעה?",
-                    subtitle = "אפשר לעקוב אחרי הכלל הכללי או לבחור לרגע הזה",
-                    showDivider = true
+                    subtitle = "בחר/י למי לשלוח את ההודעה בתרחיש הזה",
+                    showDivider = selectedPeoplePreview == null
                 ) {
                     SettingSelect(
                         selectedLabel = momentScopeLabel(scopeOverride),
                         options = momentScopeOptions(),
                         onSelect = onSelectScope
                     )
+                }
+
+                // When the resolved scope is "רק אנשים שאבחר", show the chosen people inline so the
+                // user sees who is on the list without opening the ALLOWED_RECIPIENTS screen.
+                selectedPeoplePreview?.let { preview ->
+                    SelectedPeopleInlineRow(preview = preview, onEditList = onEditSelectedPeople)
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F2F5)))
+                }
+
+                // צירוף כרטיס ביקור — the add/remove card control, available on EVERY moment. ON =
+                // the card element is attached to the message artifact; OFF = removed. Drawn element
+                // only — no real .vcf file is sent (WhatsApp blocks file-share to unsaved numbers, §2).
+                SettingRow(
+                    title = "צירוף כרטיס ביקור",
+                    subtitle = "הוסף כרטיס איש קשר לשמירה מהירה אצל הלקוח",
+                    showDivider = true
+                ) {
+                    Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
                 }
 
                 // הגבלת תדירות — "אל תשלח שוב לאותו אדם במשך 24 שעות" → cooldown setting.
@@ -1508,6 +1596,52 @@ private fun MomentEditScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Inline preview of the "רק אנשים שאבחר" list on the moment edit page: a compact summary of the
+ * chosen people ("נשלח ל: יוסי, דנה, ועוד 4") + an "ערוך רשימה ›" link into ALLOWED_RECIPIENTS.
+ * When the list is empty, a gentle prompt replaces the summary. Reuses [RecipientPreviewLogic]'s
+ * pure summary (see [SelectedPeopleInlineLogic]); no store logic here.
+ */
+@Composable
+private fun SelectedPeopleInlineRow(preview: RecipientPreview, onEditList: () -> Unit) {
+    val colors = AccessibilityExtra.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = SelectedPeopleInlineLogic.line(preview),
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            color = if (preview.count == 0) colors.textMuted else colors.textStrong,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = "ערוך רשימה ›",
+            color = colors.primary,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            modifier = Modifier.clickable(onClick = onEditList)
+        )
+    }
+}
+
+/**
+ * Pure wording for the inline "רק אנשים שאבחר" preview. Empty list ⇒ a gentle prompt; otherwise
+ * "נשלח ל: <names>[, ועוד N]". Kept pure (no Compose) so it can be asserted in a test.
+ */
+internal object SelectedPeopleInlineLogic {
+    fun line(preview: RecipientPreview): String {
+        if (preview.count == 0) return "עדיין לא נבחרו אנשים"
+        val names = preview.names.joinToString(", ")
+        return if (preview.moreCount > 0) "נשלח ל: $names, ועוד ${preview.moreCount}" else "נשלח ל: $names"
     }
 }
 
@@ -1692,7 +1826,9 @@ private fun HomeScreen(
     endedBody: String,
     noAnswerBody: String,
     signature: String,
-    cardAttached: Boolean,
+    missedCardAttached: Boolean,
+    endedCardAttached: Boolean,
+    noAnswerCardAttached: Boolean,
     cardInitials: String,
     cardLine1: String,
     onToggleMaster: () -> Unit,
@@ -1706,9 +1842,10 @@ private fun HomeScreen(
     onOpenSystemSettings: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
-    // Which accordion cards are currently open. Missed (0) opens by default; multiple may be open
-    // at once — the HTML JS only flips the tapped card's own state, never force-closing the others.
-    val openCards = remember { mutableStateListOf(0) }
+    // Which accordion cards are currently open. All start CLOSED; the user expands what they want.
+    // Multiple may be open at once — the HTML JS only flips the tapped card's own state, never
+    // force-closing the others.
+    val openCards = remember { mutableStateListOf<Int>() }
     fun toggleOpen(index: Int) {
         if (openCards.contains(index)) openCards.remove(index) else openCards.add(index)
     }
@@ -1789,7 +1926,7 @@ private fun HomeScreen(
             enabled = missedEnabled,
             active = missedActive,
             open = openCards.contains(0),
-            card = null,
+            card = if (missedCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
             onHeaderClick = { toggleOpen(0) },
             onToggle = onToggleMissed,
             onEdit = onOpenMissedJourney
@@ -1804,7 +1941,7 @@ private fun HomeScreen(
             enabled = endedEnabled,
             active = endedActive,
             open = openCards.contains(1),
-            card = if (cardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            card = if (endedCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
             onHeaderClick = { toggleOpen(1) },
             onToggle = onToggleEnded,
             onEdit = onOpenEndedJourney
@@ -1819,7 +1956,7 @@ private fun HomeScreen(
             enabled = noAnswerEnabled,
             active = noAnswerActive,
             open = openCards.contains(2),
-            card = null,
+            card = if (noAnswerCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
             onHeaderClick = { toggleOpen(2) },
             onToggle = onToggleNoAnswer,
             onEdit = onOpenNoAnswerJourney
@@ -2020,7 +2157,9 @@ private fun HomeAccordionCard(
                         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
                         color = Color(0xFFD9FDD3),
                         shadowElevation = 1.dp,
-                        modifier = Modifier.fillMaxWidth()
+                        // Tapping the preview bubble also opens this moment's edit page (same route as
+                        // the "✏️ עריכה והגדרות" button). Header-tap still only expands/collapses.
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                             Text(
@@ -2572,7 +2711,9 @@ private fun MissedCallPromptScreen(
     selectedNoAnswerId: String,
     preferredWhatsAppPackage: String,
     signature: String,
-    cardAttached: Boolean,
+    missedCardAttached: Boolean,
+    endedCardAttached: Boolean,
+    noAnswerCardAttached: Boolean,
     cardName: String,
     onDone: () -> Unit
 ) {
@@ -2609,8 +2750,14 @@ private fun MissedCallPromptScreen(
         val rel = if (callTimestampMs > 0L) RelativeTimeHebrew.of(callTimestampMs, System.currentTimeMillis()) else "עכשיו"
         "${chrome.subLinePrefix} $rel"
     }
-    // The static vCard element is drawn in the bubble only for the ended moment when the card is on.
-    val showVCard = mode == FollowUpPromptMode.CALL_ENDED && cardAttached && cardName.isNotBlank()
+    // The static vCard element is drawn in the bubble whenever the shown moment's own card flag is
+    // on (per-moment, all three moments — no longer ended-only). Drawn element only, no real .vcf.
+    val cardAttached = when (mode) {
+        FollowUpPromptMode.MISSED_CALL -> missedCardAttached
+        FollowUpPromptMode.NO_ANSWER_OUTGOING -> noAnswerCardAttached
+        FollowUpPromptMode.CALL_ENDED -> endedCardAttached
+    }
+    val showVCard = cardAttached && cardName.isNotBlank()
     val metaTime = remember(callTimestampMs) {
         val ms = if (callTimestampMs > 0L) callTimestampMs else System.currentTimeMillis()
         java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
@@ -4477,7 +4624,7 @@ private fun SmartRulesScreen(
                     Text("מי מקבל הודעות המשך (ברירת מחדל)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.Heading)
                 }
                 Text(
-                    "כל רגע יכול לעקוב אחרי הבחירה הזאת, או לבחור אחרת בעצמו.",
+                    "מי מקבל הודעות ברירת מחדל",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = AccessibilityColors.TextMuted

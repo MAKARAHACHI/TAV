@@ -3,27 +3,64 @@ package com.followupnadlan.accessibility
 import android.content.Context
 
 /**
- * Whether the business card is attached to the follow-up message ("מצורף").
+ * Whether the contact card is attached to a moment's follow-up message ("צירוף כרטיס ביקור").
  *
- * The toggle lives *on* the card inside the preview, and turning it off removes the card from the
- * preview live — the user sees the message shrink to exactly what the client will receive. That is
- * the artifact-not-description rule: no separate "האם לצרף?" row describing a thing you could
- * instead just show.
+ * The card is now an opt-in ADD/REMOVE control per moment (missed / ended / no-answer), not a fixed
+ * decoration: the user turns it ON to attach the card element and OFF to remove it. The flag only
+ * governs whether the card ELEMENT is DRAWN in the message artifact — the card stays a drawn element
+ * only (WhatsApp blocks file-share to an unsaved number's chat, so no real .vcf is sent, §2).
  *
- * "The card" here is the signature line rendered as text at the end of the message — there is no
- * vCard in MVP-1 (WhatsApp blocks file sharing to unsaved numbers, and most clients are unsaved).
+ * Default is OFF for all three moments: no card unless the user chose to add it.
+ *
+ * [EndedCardSettings] backs the ended moment; [MissedCardSettings] / [NoAnswerCardSettings] are the
+ * parallel per-moment stores (same shape, own prefs file). Defined here so the shape lives once.
  */
 class EndedCardSettings(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
     var cardAttached: Boolean
-        get() = preferences.getBoolean(KEY_CARD_ATTACHED, true)
+        get() = preferences.getBoolean(KEY_CARD_ATTACHED, DEFAULT_CARD_ATTACHED)
         set(value) {
             preferences.edit().putBoolean(KEY_CARD_ATTACHED, value).apply()
         }
 
     private companion object {
         const val PREFERENCES_NAME = "ended_card_settings"
+        const val KEY_CARD_ATTACHED = "card_attached"
+    }
+}
+
+/** Default OFF: the card is drawn only when the user opts in per moment. Shared by the three stores. */
+internal const val DEFAULT_CARD_ATTACHED = false
+
+/** Per-moment card-attached flag for the MISSED moment. Same shape as [EndedCardSettings]. */
+class MissedCardSettings(context: Context) {
+    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+    var cardAttached: Boolean
+        get() = preferences.getBoolean(KEY_CARD_ATTACHED, DEFAULT_CARD_ATTACHED)
+        set(value) {
+            preferences.edit().putBoolean(KEY_CARD_ATTACHED, value).apply()
+        }
+
+    private companion object {
+        const val PREFERENCES_NAME = "missed_card_settings"
+        const val KEY_CARD_ATTACHED = "card_attached"
+    }
+}
+
+/** Per-moment card-attached flag for the NO_ANSWER (outgoing not answered) moment. */
+class NoAnswerCardSettings(context: Context) {
+    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+
+    var cardAttached: Boolean
+        get() = preferences.getBoolean(KEY_CARD_ATTACHED, DEFAULT_CARD_ATTACHED)
+        set(value) {
+            preferences.edit().putBoolean(KEY_CARD_ATTACHED, value).apply()
+        }
+
+    private companion object {
+        const val PREFERENCES_NAME = "no_answer_card_settings"
         const val KEY_CARD_ATTACHED = "card_attached"
     }
 }
