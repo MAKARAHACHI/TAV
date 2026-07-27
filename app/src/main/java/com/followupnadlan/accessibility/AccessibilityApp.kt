@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
@@ -40,6 +41,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
@@ -198,6 +201,31 @@ internal object HomeMessagePreviewLogic {
     }
 }
 
+/** The two approval choices on the moment edit page — send by itself, or wait for my approval. */
+internal enum class MomentApprovalMode { AUTOMATIC, MANUAL }
+
+/**
+ * Pure mapping between the moment edit page's "אישור לפני שליחה" select and the engine's existing
+ * automation flags. Kept engine-agnostic (returns the flag pair) so it can be asserted in a test
+ * without touching SharedPreferences.
+ *
+ * MANUAL is the prepared-manual path (the pure approval sheet); AUTOMATIC is the real "phone sends
+ * by itself" path that already exists for the missed moment (ACCESSIBILITY_AUTO + automation on).
+ * The flags are a single global pair — the ended/no-answer send paths always prompt regardless, so
+ * choosing AUTOMATIC there has no effect on those moments (their prompt is unconditional).
+ */
+internal object MomentApprovalModeMapper {
+    data class Flags(val whatsappMode: MissedCallWhatsAppMode, val automationEnabled: Boolean)
+
+    fun toFlags(mode: MomentApprovalMode): Flags = when (mode) {
+        MomentApprovalMode.MANUAL -> Flags(MissedCallWhatsAppMode.PREPARED_MANUAL, automationEnabled = false)
+        MomentApprovalMode.AUTOMATIC -> Flags(MissedCallWhatsAppMode.ACCESSIBILITY_AUTO, automationEnabled = true)
+    }
+
+    fun fromWhatsAppMode(mode: MissedCallWhatsAppMode): MomentApprovalMode =
+        if (mode == MissedCallWhatsAppMode.PREPARED_MANUAL) MomentApprovalMode.MANUAL else MomentApprovalMode.AUTOMATIC
+}
+
 /** Carries the missed-call context when the app is opened from a follow-up notification. */
 data class MissedCallLaunch(
     val phone: String = "",
@@ -266,6 +294,18 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var askBeforeSend by remember {
         mutableStateOf(settings.whatsappMode == MissedCallWhatsAppMode.PREPARED_MANUAL)
     }
+    // Approval mode for the moment edit page ("אישור לפני שליחה"). Maps to the same global
+    // whatsappMode/automation flags as askBeforeSend, via MomentApprovalModeMapper.
+    var approvalMode by remember {
+        mutableStateOf(MomentApprovalModeMapper.fromWhatsAppMode(settings.whatsappMode))
+    }
+    // "הגבלת תדירות" — the 24h no-repeat rule. ON ⇒ same-number cooldown = 24h (the existing
+    // default); OFF ⇒ no wait. Backed by FollowUpCooldownSettings.sameNumberCooldownMillis (the
+    // ended/no-answer decider's brake) and mirrored into settings.cooldownMillis (the missed
+    // decider's brake) so every moment's 24h toggle is honored by the path that sends it.
+    var frequencyLimitOn by remember {
+        mutableStateOf(cooldownSettings.sameNumberCooldownMillis != null)
+    }
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
     // The ended moment's own scope — a separate decision from missed (different jobs, §4).
     var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
@@ -311,6 +351,81 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     ) { granted ->
         settings.smsFallbackEnabled = granted
         smsFallback = granted
+    }
+    // The channel to fall back to if the SMS runtime permission is denied when SMS is picked on the
+    // moment edit page. Set just before the request; consumed by the launcher below.
+    var channelBeforeSmsRequest by remember { mutableStateOf(FollowUpChannel.WHATSAPP) }
+    val momentSmsChannelPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            selectedChannel = FollowUpChannel.SMS
+            FollowUpChannelSettings.apply(settings, FollowUpChannel.SMS)
+            smsFallback = settings.smsFallbackEnabled
+        } else {
+            // Denied: revert to the previous channel and briefly explain SMS needs the permission.
+            selectedChannel = channelBeforeSmsRequest
+            FollowUpChannelSettings.apply(settings, channelBeforeSmsRequest)
+            smsFallback = settings.smsFallbackEnabled
+            preferredWhatsApp = if (channelBeforeSmsRequest == FollowUpChannel.WHATSAPP_BUSINESS) {
+                WhatsAppChoice.BUSINESS
+            } else {
+                WhatsAppChoice.REGULAR
+            }
+            undoScope.launch {
+                snackbarHostState.showSnackbar("כדי לשלוח ב-SMS צריך הרשאת שליחת הודעות", withDismissAction = true)
+            }
+        }
+    }
+
+    // Shared moment-edit handler: pick a delivery channel. SMS is gated on the SEND_SMS runtime
+    // permission (request at point of selection; on deny, revert + explain). WhatsApp options apply
+    // immediately. Reuses FollowUpChannelSettings so the picked channel is the channel used (§2).
+    fun onMomentSelectChannel(channel: FollowUpChannel) {
+        if (channel == FollowUpChannel.SMS &&
+            context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            channelBeforeSmsRequest = selectedChannel
+            momentSmsChannelPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+            return
+        }
+        selectedChannel = channel
+        FollowUpChannelSettings.apply(settings, channel)
+        smsFallback = settings.smsFallbackEnabled
+        preferredWhatsApp = if (channel == FollowUpChannel.WHATSAPP_BUSINESS) {
+            WhatsAppChoice.BUSINESS
+        } else {
+            WhatsAppChoice.REGULAR
+        }
+    }
+
+    // Shared moment-edit handler: pick the approval mode. Maps to the same global automation flags
+    // the Settings screen and missed journey already persist (MomentApprovalModeMapper). Note: the
+    // ended/no-answer send paths always prompt regardless, so AUTOMATIC only takes real effect on
+    // the missed moment; on the other two it is a no-op under the hood.
+    fun onMomentSelectApproval(mode: MomentApprovalMode) {
+        approvalMode = mode
+        val flags = MomentApprovalModeMapper.toFlags(mode)
+        settings.whatsappMode = flags.whatsappMode
+        settings.whatsappAutomationEnabled = flags.automationEnabled
+        askBeforeSend = mode == MomentApprovalMode.MANUAL
+    }
+
+    // Shared moment-edit handler: the 24h no-repeat toggle. ON ⇒ 24h same-number cooldown; OFF ⇒
+    // no wait. Written to both cooldown brakes so the missed path (settings.cooldownMillis) and the
+    // ended/no-answer path (FollowUpCooldownSettings.sameNumberCooldownMillis) both honor it.
+    fun onMomentToggleFrequencyLimit() {
+        val next = !frequencyLimitOn
+        frequencyLimitOn = next
+        if (next) {
+            cooldownSettings.sameNumberCooldownMillis = FollowUpCooldownSettings.DEFAULT_SAME_NUMBER_MILLIS
+            settings.cooldownMillis = FollowUpCooldownSettings.DEFAULT_SAME_NUMBER_MILLIS
+        } else {
+            cooldownSettings.sameNumberCooldownMillis = null
+            // settings.cooldownMillis has a 60s floor (cannot be truly zero); the smallest allowed
+            // value is the closest this brake gets to "off" for the missed moment.
+            settings.cooldownMillis = 0L
+        }
     }
     val callDetectionPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -374,6 +489,31 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             },
             onAddVariant = { messageEditorTarget = MessageEditorTarget(role, variantId = "", isNew = true) }
         )
+    }
+
+    // Hardware/gesture Back pops the in-app screen stack instead of exiting the app. Topmost
+    // overlay first: dialog pickers → card editor → message editor → full-screen picker → modal →
+    // non-Home tab. Only enabled while something is open; at the Home root it stays disabled so the
+    // system default (leave the app) applies. Mirrors the onBack each screen already wires.
+    val hasBackStack = recipientPickerOpen || askPickerOpen || channelPickerOpen ||
+        endedScopePickerOpen || cardEditorOpen || messageEditorTarget != null ||
+        activePicker != null || modal != AccessibilityModal.NONE || tab != AccessibilityTab.HOME
+    BackHandler(enabled = hasBackStack) {
+        when {
+            recipientPickerOpen -> recipientPickerOpen = false
+            askPickerOpen -> askPickerOpen = false
+            channelPickerOpen -> channelPickerOpen = false
+            endedScopePickerOpen -> endedScopePickerOpen = false
+            cardEditorOpen -> { cardEditorOpen = false; profileRefresh++ }
+            messageEditorTarget != null -> messageEditorTarget = null
+            activePicker != null -> activePicker = null
+            // HISTORY and SUPPORT are reached from SYSTEM_SETTINGS, so Back returns there — every
+            // other modal returns to its parent tab (Home). Matches each screen's own onBack.
+            modal == AccessibilityModal.HISTORY || modal == AccessibilityModal.SUPPORT ->
+                modal = AccessibilityModal.SYSTEM_SETTINGS
+            modal != AccessibilityModal.NONE -> { modal = AccessibilityModal.NONE; recipientsRefresh++ }
+            tab != AccessibilityTab.HOME -> tab = AccessibilityTab.HOME
+        }
     }
 
     if (!onboardingDone) {
@@ -689,22 +829,26 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         val missedTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.MISSED_CALL, selectedMissedId
                         )
-                        MissedJourneyScreen(
+                        MomentEditScreen(
+                            title = "אם לא עניתי",
                             isEnabled = missedMomentEnabled,
-                            missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
-                            recipientLabel = recipientScopeLabel(recipientScope),
-                            askBeforeSend = askBeforeSend,
+                            time = "10:42",
+                            activeBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
+                            availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
+                            selectedChannel = selectedChannel,
+                            approvalMode = approvalMode,
+                            frequencyLimitOn = frequencyLimitOn,
                             variants = momentVariantsFor(TemplateRole.MISSED_CALL),
                             onToggleEnabled = {
-                                // Per-moment toggle for the missed moment (Part C2).
                                 missedMomentEnabled = !missedMomentEnabled
                                 settings.missedMomentEnabled = missedMomentEnabled
                             },
-                            onEditRecipient = { recipientPickerOpen = true },
-                            onEditAskBeforeSend = { askPickerOpen = true },
-                            onEditChannel = { channelPickerOpen = true },
+                            onSelectChannel = ::onMomentSelectChannel,
+                            onSelectApprovalMode = ::onMomentSelectApproval,
+                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -713,23 +857,26 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         val endedTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.CALL_ENDED, selectedEndedId
                         )
-                        val endedCard = remember(profileRefresh) {
-                            ContactCard.fromProfile(myDetailsStore.load())
-                        }
-                        EndedJourneyScreen(
-                            reminderBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
-                            card = endedCard,
-                            cardAttached = cardAttached,
-                            scopeLabel = endedScopeLabel(endedScope),
+                        MomentEditScreen(
+                            title = "אחרי שדיברנו",
+                            isEnabled = endedMomentEnabled,
+                            signature = signaturePreview,
+                            time = "11:05",
+                            activeBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
+                            availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
+                            selectedChannel = selectedChannel,
+                            approvalMode = approvalMode,
+                            frequencyLimitOn = frequencyLimitOn,
                             variants = momentVariantsFor(TemplateRole.CALL_ENDED),
-                            onEditCard = { cardEditorOpen = true },
-                            onToggleCardAttached = {
-                                cardAttached = !cardAttached
-                                endedCardSettings.cardAttached = cardAttached
+                            onToggleEnabled = {
+                                endedMomentEnabled = !endedMomentEnabled
+                                settings.endedMomentEnabled = endedMomentEnabled
                             },
-                            onEditScope = { endedScopePickerOpen = true },
-                            onEditChannel = { channelPickerOpen = true },
+                            onSelectChannel = ::onMomentSelectChannel,
+                            onSelectApprovalMode = ::onMomentSelectApproval,
+                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -738,19 +885,26 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         val noAnswerTemplate = TemplateRoleSelector.forRole(
                             templates, TemplateRole.NO_ANSWER_OUTGOING, selectedNoAnswerId
                         )
-                        NoAnswerJourneyScreen(
+                        MomentEditScreen(
+                            title = "לא ענו לי",
                             isEnabled = noAnswerMomentEnabled,
-                            body = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
-                            scopeLabel = endedScopeLabel(endedScope),
+                            time = "12:30",
+                            activeBody = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
+                            availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
+                            selectedChannel = selectedChannel,
+                            approvalMode = approvalMode,
+                            frequencyLimitOn = frequencyLimitOn,
                             variants = momentVariantsFor(TemplateRole.NO_ANSWER_OUTGOING),
                             onToggleEnabled = {
                                 noAnswerMomentEnabled = !noAnswerMomentEnabled
                                 settings.noAnswerMomentEnabled = noAnswerMomentEnabled
                             },
-                            onEditScope = { endedScopePickerOpen = true },
-                            onEditChannel = { channelPickerOpen = true },
+                            onSelectChannel = ::onMomentSelectChannel,
+                            onSelectApprovalMode = ::onMomentSelectApproval,
+                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -1039,185 +1193,6 @@ private fun NavItem(label: String, icon: ImageVector, selected: Boolean, onClick
     }
 }
 
-/**
- * One journey row (Design Pass 2/3): a question/label on top, the current *result* below, and a
- * trailing chevron when [onClick] is set. The value is result-language, never a mechanism name —
- * the caller passes "לכל מי שמתקשר", not "Recipient Scope". Display-only until the wiring pass:
- * [onClick] is null in these passes, so the chevron is shown but the row is inert.
- */
-@Composable
-private fun JourneyResultRow(
-    title: String,
-    value: String,
-    onClick: (() -> Unit)? = null
-) {
-    val rowModifier = if (onClick != null) {
-        Modifier.clickable(onClick = onClick)
-    } else {
-        Modifier
-    }
-    AppCard(cornerRadius = 18) {
-        Row(
-            modifier = rowModifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = title,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = AccessibilityColors.TextMuted
-                )
-                Text(
-                    text = value,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = AccessibilityColors.TextStrong
-                )
-            }
-            if (onClick != null) {
-                Icon(
-                    AccessibilityIcons.ChevronStart,
-                    contentDescription = null,
-                    tint = AccessibilityColors.TextFaint,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-    }
-}
-
-/** A quiet, borderless journey line — e.g. the cooldown statement. No picker, no chevron. */
-@Composable
-private fun JourneyQuietLine(text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            AccessibilityIcons.Schedule,
-            contentDescription = null,
-            tint = AccessibilityColors.TextFaint,
-            modifier = Modifier.size(18.dp)
-        )
-        Text(
-            text = text,
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
-            color = AccessibilityColors.TextMuted
-        )
-    }
-}
-
-/** Section label above a journey row group ("ההודעה", "התזכורת", "כרטיס הביקור"). */
-@Composable
-private fun JourneySectionLabel(text: String) {
-    Text(
-        text = text,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = 15.sp,
-        color = AccessibilityColors.Heading,
-        modifier = Modifier.fillMaxWidth()
-    )
-}
-
-/**
- * Part B — the up-to-5 message-variant list for one moment. The user picks ONE active variant
- * (radio-style); the active variant is exactly what gets sent (not random / round-robin). Each row
- * can be edited or deleted; "הוסף נוסח" adds one until the cap of 5.
- *
- * The variants ARE the role's templates in the store; the active id is the moment's stored
- * selection. This reuses the existing template store rather than adding a parallel model.
- */
-@Composable
-private fun VariantListSection(
-    variants: List<MessageTemplate>,
-    activeId: String,
-    canAdd: Boolean,
-    onSelectActive: (String) -> Unit,
-    onEditVariant: (String) -> Unit,
-    onDeleteVariant: (String) -> Unit,
-    onAddVariant: () -> Unit
-) {
-    val colors = AccessibilityExtra.colors
-    AppCard(cornerRadius = 20) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-            variants.forEachIndexed { index, variant ->
-                val isActive = variant.id == activeId
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectActive(variant.id) }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        if (isActive) AccessibilityIcons.RadioChecked else AccessibilityIcons.RadioUnchecked,
-                        contentDescription = if (isActive) "נוסח פעיל" else "בחר נוסח",
-                        tint = if (isActive) colors.primary else AccessibilityColors.UnselectedIcon,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        text = variant.body.trim().ifBlank { "(נוסח ריק)" },
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        maxLines = 2,
-                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isActive) colors.textStrong else colors.textBody,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        AccessibilityIcons.Edit,
-                        contentDescription = "ערוך נוסח",
-                        tint = colors.primary,
-                        modifier = Modifier.size(19.dp).clickable { onEditVariant(variant.id) }
-                    )
-                    // The last remaining variant of a moment cannot be deleted — a moment must
-                    // always keep one message to send.
-                    if (variants.size > 1) {
-                        Icon(
-                            AccessibilityIcons.Delete,
-                            contentDescription = "מחק נוסח",
-                            tint = colors.danger,
-                            modifier = Modifier.size(19.dp).clickable { onDeleteVariant(variant.id) }
-                        )
-                    }
-                }
-                if (index != variants.lastIndex) {
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F0F0)))
-                }
-            }
-            if (canAdd) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onAddVariant)
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(AccessibilityIcons.Add, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
-                    Text("הוסף נוסח", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                }
-            } else {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "הגעת ל-5 נוסחים (המקסימום)",
-                    fontSize = 12.sp,
-                    color = colors.textMuted,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
-        }
-    }
-}
-
 // Wiring Pass: a minimal single-choice picker used by the journey rows (recipient scope, ask-
 // before-send). Options are (value, label) pairs; picking one calls onSelect and closes. Design is
 // intentionally throwaway — the UI is scheduled to be re-skinned; this just makes the choice work.
@@ -1251,399 +1226,364 @@ private fun <T> JourneyOptionPickerDialog(
     )
 }
 
-// ===================== SCREEN 2 — "אם לא עניתי" (Design Pass 2) =====================
-// A stand-alone journey page (deep-link safe). Each row is a result that stands on its own —
-// no summary, no chips. Result-language only (Golden Rule): "מי יקבל את ההודעה?" answers with
-// "לכל מי שמתקשר", the send-confirm row asks a decision, not "how it's sent". Display-only:
-// values are read from the existing stores; the chevrons don't open pickers until the wiring pass.
+// ===================== MOMENT EDIT SCREEN (edit-scenario-fixed.html) =====================
+/**
+ * The per-moment edit page reached from Home's "עריכה והגדרות". One unified screen for all three
+ * moments (missed / ended / no-answer), matching edit-scenario-fixed.html: nav bar + per-moment
+ * toggle, a LIVE WhatsApp preview bubble, a clean up-to-5 template list, and one unified
+ * settings card (channel / approval / audience deep-link / 24h frequency).
+ *
+ * WYSIWYG: the hero bubble shows the ACTIVE variant's text; selecting another template below sets it
+ * active and the bubble updates immediately (the active id comes from [variants], which the caller
+ * re-derives from the store on each recomposition). The channel tag reflects [channelLabel].
+ */
 @Composable
-private fun MissedJourneyScreen(
+private fun MomentEditScreen(
+    title: String,
     isEnabled: Boolean,
-    missedBody: String,
     signature: String,
-    recipientLabel: String,
-    askBeforeSend: Boolean,
+    time: String,
+    activeBody: String,
     channelLabel: String,
+    availableChannels: List<FollowUpChannel>,
+    selectedChannel: FollowUpChannel,
+    approvalMode: MomentApprovalMode,
+    frequencyLimitOn: Boolean,
     variants: MomentVariants,
     onToggleEnabled: () -> Unit,
-    onEditRecipient: () -> Unit,
-    onEditAskBeforeSend: () -> Unit,
-    onEditChannel: () -> Unit,
+    onSelectChannel: (FollowUpChannel) -> Unit,
+    onSelectApprovalMode: (MomentApprovalMode) -> Unit,
+    onToggleFrequencyLimit: () -> Unit,
+    onOpenSmartRules: () -> Unit,
     onBack: () -> Unit
 ) {
+    val colors = AccessibilityExtra.colors
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        ModalHeader(title = "אם לא עניתי", onBack = onBack)
-
-        // 1 — isEnabled exists in the engine, so it must be visible (§2). Off means clients who
-        // don't reach you get nothing; hiding that would be the exact false belief §2 forbids.
-        JourneySwitchRow(
-            label = "פועל",
-            checked = isEnabled,
-            onToggle = onToggleEnabled
-        )
-
-        // 2 — the ACTIVE variant exactly as it will be sent (dimmed when off), then the full
-        // up-to-5 variant list where the user picks which one is active (Part B).
-        JourneySectionLabel("ההודעה")
-        MessageWithSignaturePreview(
-            body = missedBody,
-            signature = signature,
-            dimmed = !isEnabled,
-            onEditBody = { variants.onEditVariant(variants.activeId) }
-        )
-        VariantListSection(
-            variants = variants.variants,
-            activeId = variants.activeId,
-            canAdd = variants.canAdd,
-            onSelectActive = variants.onSelectActive,
-            onEditVariant = variants.onEditVariant,
-            onDeleteVariant = variants.onDeleteVariant,
-            onAddVariant = variants.onAddVariant
-        )
-        if (!isEnabled) {
-            JourneyQuietLine("לקוחות שלא נענו לא יקבלו הודעה.")
-        }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // 3 — who receives it (result, not "recipient scope").
-        JourneyResultRow(title = "מי יקבל את ההודעה?", value = recipientLabel, onClick = onEditRecipient)
-        // 4 — the confirm-before-send decision, phrased as a result.
-        JourneyResultRow(
-            title = "האם לאשר לפני שליחה?",
-            value = if (askBeforeSend) "כן, אאשר כל הודעה" else "לא, תישלח גם בלי אישורי",
-            onClick = onEditAskBeforeSend
-        )
-        // 5 — the channel, now an explicit choice. See FollowUpChannelSettings: each option
-        // stores a flag pair with fallback OFF, so the chosen channel is the channel used.
-        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // 6 — cooldown, stated quietly. No picker (⚪ — not a decision the user should carry).
-        JourneyQuietLine("לא נשלח שוב לאותו אדם במשך יממה.")
-    }
-}
-
-/**
- * The message exactly as the client will receive it: an editable body plus the signature line,
- * always visible and always locked.
- *
- * Locked-but-visible is deliberate (§2): the signature is part of what the client gets, so hiding
- * it during editing would show the user less than the truth. It is not editable here because it is
- * identity, not wording — it is changed by editing the profile, in one place.
- */
-@Composable
-private fun MessageWithSignaturePreview(
-    body: String,
-    signature: String,
-    dimmed: Boolean,
-    onEditBody: () -> Unit
-) {
-    val colors = AccessibilityExtra.colors
-    val alpha = if (dimmed) 0.45f else 1f
-    Surface(
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-        color = colors.bubbleGreen.copy(alpha = alpha),
-        shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
-            Text(
-                text = body.ifBlank { " " },
-                color = colors.textStrong.copy(alpha = alpha),
-                fontSize = 18.sp,
-                lineHeight = 29.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onEditBody)
-            )
-            if (signature.isNotBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = signature,
-                        color = colors.textMuted.copy(alpha = alpha),
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        AccessibilityIcons.Lock,
-                        contentDescription = "שורת החתימה נקבעת מהפרטים שלך",
-                        tint = colors.textFaint.copy(alpha = alpha),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** A journey row carrying a real on/off switch — used for the missed journey's "פועל". */
-@Composable
-private fun JourneySwitchRow(
-    label: String,
-    checked: Boolean,
-    onToggle: () -> Unit
-) {
-    AppCard(cornerRadius = 18) {
+        // NAV BAR — back "חזרה" (primary, right), moment title, per-moment enable toggle (left).
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = label,
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
-                color = AccessibilityColors.TextStrong
-            )
-            Switch(checked = checked, onCheckedChange = { onToggle() })
+            Row(
+                modifier = Modifier.clickable(onClick = onBack),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    AccessibilityIcons.ChevronStart,
+                    contentDescription = "חזרה",
+                    tint = colors.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text("חזרה", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            }
+            Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = colors.heading)
+            Switch(checked = isEnabled, onCheckedChange = { onToggleEnabled() })
+        }
+
+        // HERO — live preview card (chat-bg), tag row + channel name, then the WhatsApp bubble
+        // carrying the ACTIVE template text + bold signature + meta (time + static ✓✓).
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFFEFEAE2),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x0D000000)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("תצוגה מקדימה חיה", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = colors.textMuted)
+                    Text(channelLabel, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = colors.primary)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
+                    color = Color(0xFFD9FDD3),
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                        Text(
+                            text = activeBody.ifBlank { " " },
+                            color = Color(0xFF111B21),
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp
+                        )
+                        if (signature.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = signature,
+                                color = Color(0xFF111B21),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(time, fontSize = 10.sp, color = Color(0xFF667781))
+                            Text("✓✓", fontSize = 10.sp, color = Color(0xFF53BDEB))
+                        }
+                    }
+                }
+            }
+        }
+
+        // CARD "תבניות הודעה" — clean variant list (up to 5). Each row: custom radio + text +
+        // discreet ערוך / מחק text links. Selecting a row sets it active (updates the hero).
+        AppCard(cornerRadius = 20, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("תבניות הודעה", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = colors.heading)
+                Spacer(modifier = Modifier.height(14.dp))
+                variants.variants.forEach { variant ->
+                    CleanTemplateRow(
+                        text = variant.body.trim().ifBlank { "(נוסח ריק)" },
+                        selected = variant.id == variants.activeId,
+                        canDelete = variants.variants.size > 1,
+                        onSelect = { variants.onSelectActive(variant.id) },
+                        onEdit = { variants.onEditVariant(variant.id) },
+                        onDelete = { variants.onDeleteVariant(variant.id) }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+                // "+ הוסף נוסח חדש" dashed button — hidden at the max-5 cap (canAdd=false).
+                if (variants.canAdd) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.5.dp, Color(0xFFC1C7CB), RoundedCornerShape(12.dp))
+                            .background(Color(0xFFF4F6F8))
+                            .clickable(onClick = variants.onAddVariant)
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+ הוסף נוסח חדש", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                } else {
+                    Text(
+                        "הגעת ל-5 נוסחים (המקסימום)",
+                        fontSize = 12.sp,
+                        color = colors.textMuted
+                    )
+                }
+            }
+        }
+
+        // CARD "הגדרות תרחיש וערוץ" — unified settings: channel / approval / audience / frequency.
+        AppCard(cornerRadius = 20, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("הגדרות תרחיש וערוץ", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = colors.heading)
+
+                // ערוץ שליחה — WhatsApp / WhatsApp Business (only when installed) / SMS.
+                SettingRow(
+                    title = "ערוץ שליחה",
+                    subtitle = "באיזו אפליקציה יישלחו ההודעות",
+                    showDivider = true
+                ) {
+                    SettingSelect(
+                        selectedLabel = channelLabel(selectedChannel),
+                        options = availableChannels.map { it to channelLabel(it) },
+                        onSelect = onSelectChannel
+                    )
+                }
+
+                // אישור לפני שליחה — אוטומטי (ללא אישור) / ידני (באישור שלי).
+                SettingRow(
+                    title = "אישור לפני שליחה",
+                    subtitle = "האם לשלוח לבד או לבקש אישור",
+                    showDivider = true
+                ) {
+                    SettingSelect(
+                        selectedLabel = approvalModeLabel(approvalMode),
+                        options = listOf(
+                            MomentApprovalMode.AUTOMATIC to approvalModeLabel(MomentApprovalMode.AUTOMATIC),
+                            MomentApprovalMode.MANUAL to approvalModeLabel(MomentApprovalMode.MANUAL)
+                        ),
+                        onSelect = onSelectApprovalMode
+                    )
+                }
+
+                // מי יקבל את ההודעה? — managed in smart-rules; deep-link there (no duplicate picker).
+                SettingRow(
+                    title = "מי יקבל את ההודעה?",
+                    subtitle = "מנוהל בהגדרות החכמות",
+                    showDivider = true
+                ) {
+                    Row(
+                        modifier = Modifier.clickable(onClick = onOpenSmartRules),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text("פתח הגדרות חכמות", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("›", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+
+                // הגבלת תדירות — "אל תשלח שוב לאותו אדם במשך 24 שעות" → cooldown setting.
+                SettingRow(
+                    title = "הגבלת תדירות",
+                    subtitle = "אל תשלח שוב לאותו אדם במשך 24 שעות",
+                    showDivider = false
+                ) {
+                    Switch(checked = frequencyLimitOn, onCheckedChange = { onToggleFrequencyLimit() })
+                }
+            }
         }
     }
 }
 
-// ===================== SCREEN 3 — "אחרי שדיברנו" (Design Pass 3) =====================
-// Configure only — never Act. The ended send happens in a notification 5-10s after a call, not
-// here. So this page has no "שלח", no client picker, no CTA. It only defines what will be sent:
-// the reminder wording and the business card. "הודעה" becomes "תזכורת" in the display lexicon.
-// Display-only: "שנה"/"ערוך" are inert until the wiring pass.
-@Composable
-private fun EndedJourneyScreen(
-    reminderBody: String,
-    card: ContactCard,
-    cardAttached: Boolean,
-    scopeLabel: String,
-    channelLabel: String,
-    variants: MomentVariants,
-    onEditCard: () -> Unit,
-    onToggleCardAttached: () -> Unit,
-    onEditScope: () -> Unit,
-    onEditChannel: () -> Unit,
-    onBack: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        ModalHeader(title = "אחרי שדיברנו", onBack = onBack)
-
-        // 1+2 — the ACTIVE variant with the card sitting inside it, exactly as it will arrive, then
-        // the up-to-5 variant list (Part B). The card is part of the message, so it is shown inside
-        // the same bubble, not beside it.
-        JourneySectionLabel("הודעת ההמשך")
-        EndedMessagePreview(
-            body = reminderBody,
-            card = card,
-            cardAttached = cardAttached,
-            onEditBody = { variants.onEditVariant(variants.activeId) },
-            onEditCard = onEditCard,
-            onToggleCardAttached = onToggleCardAttached
-        )
-        VariantListSection(
-            variants = variants.variants,
-            activeId = variants.activeId,
-            canAdd = variants.canAdd,
-            onSelectActive = variants.onSelectActive,
-            onEditVariant = variants.onEditVariant,
-            onDeleteVariant = variants.onDeleteVariant,
-            onAddVariant = variants.onAddVariant
-        )
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // 3 — which conversations get an offer. Not "who receives" — nobody receives anything
-        // automatically here; this only controls when the suggestion appears.
-        JourneyResultRow(
-            title = "אחרי אילו שיחות להציע לשלוח?",
-            value = scopeLabel,
-            onClick = onEditScope
-        )
-        // 4 — the channel, a separate setting from the missed moment's.
-        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
-    }
+/** Hebrew label for the approval-mode select. */
+private fun approvalModeLabel(mode: MomentApprovalMode): String = when (mode) {
+    MomentApprovalMode.AUTOMATIC -> "אוטומטי (ללא אישור)"
+    MomentApprovalMode.MANUAL -> "ידני (באישור שלי)"
 }
 
-// ===================== SCREEN 4 — "לא ענו" (Part A) =====================
-// The outgoing-not-answered moment: I called a client who did not pick up. MANUAL approve — the
-// send happens from the follow-up notification (edit-before-send), never automatically. Styled like
-// the missed journey: a per-moment toggle, the active variant preview, the variant list, and the
-// scope/channel result rows it shares with the ended moment.
+/**
+ * One unified settings row (edit-scenario-fixed.html .setting-row): title + subtitle on the right,
+ * the control ([trailing]) on the left, optional bottom divider. Padding matches the HTML's 12px.
+ */
 @Composable
-private fun NoAnswerJourneyScreen(
-    isEnabled: Boolean,
-    body: String,
-    signature: String,
-    scopeLabel: String,
-    channelLabel: String,
-    variants: MomentVariants,
-    onToggleEnabled: () -> Unit,
-    onEditScope: () -> Unit,
-    onEditChannel: () -> Unit,
-    onBack: () -> Unit
+private fun SettingRow(
+    title: String,
+    subtitle: String,
+    showDivider: Boolean,
+    trailing: @Composable () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        ModalHeader(title = "לא ענו", onBack = onBack)
-
-        JourneySwitchRow(label = "פועל", checked = isEnabled, onToggle = onToggleEnabled)
-
-        JourneySectionLabel("ההודעה")
-        MessageWithSignaturePreview(
-            body = body,
-            signature = signature,
-            dimmed = !isEnabled,
-            onEditBody = { variants.onEditVariant(variants.activeId) }
-        )
-        VariantListSection(
-            variants = variants.variants,
-            activeId = variants.activeId,
-            canAdd = variants.canAdd,
-            onSelectActive = variants.onSelectActive,
-            onEditVariant = variants.onEditVariant,
-            onDeleteVariant = variants.onDeleteVariant,
-            onAddVariant = variants.onAddVariant
-        )
-        if (!isEnabled) {
-            JourneyQuietLine("לא תישלח הודעה למי שלא ענה לך.")
+    val colors = AccessibilityExtra.colors
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = colors.textStrong)
+                Text(subtitle, fontSize = 12.sp, color = colors.textMuted)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            trailing()
         }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        JourneyResultRow(title = "אחרי אילו שיחות להציע לשלוח?", value = scopeLabel, onClick = onEditScope)
-        JourneyResultRow(title = "באיזה ערוץ?", value = channelLabel, onClick = onEditChannel)
-
-        Spacer(modifier = Modifier.height(2.dp))
-        JourneyQuietLine("ההודעה נשלחת רק אחרי אישור שלך.")
+        if (showDivider) {
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F2F5)))
+        }
     }
 }
 
 /**
- * The follow-up message as the client receives it: an editable body, and the business card woven
- * in as the closing line.
- *
- * The "מצורף" switch sits *on the card, inside the bubble* — flipping it removes the card from the
- * preview live, so the user watches the message become what will actually be sent. A separate
- * "האם לצרף כרטיס?" row would describe that instead of showing it.
+ * The pill "select" control (edit-scenario-fixed.html .setting-select): a tappable grey pill showing
+ * the current label; tapping opens a dropdown of the options. Reused for channel and approval.
  */
 @Composable
-private fun EndedMessagePreview(
-    body: String,
-    card: ContactCard,
-    cardAttached: Boolean,
-    onEditBody: () -> Unit,
-    onEditCard: () -> Unit,
-    onToggleCardAttached: () -> Unit
+private fun <T> SettingSelect(
+    selectedLabel: String,
+    options: List<Pair<T, String>>,
+    onSelect: (T) -> Unit
+) {
+    val colors = AccessibilityExtra.colors
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFFF4F6F8))
+                .clickable { expanded = true }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(selectedLabel, color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Icon(AccessibilityIcons.ExpandMore, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label, fontSize = 14.sp, color = colors.textStrong) },
+                    onClick = {
+                        expanded = false
+                        onSelect(value)
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A clean template row (edit-scenario-fixed.html .template-item): custom radio + text + discreet
+ * ערוך / מחק text links below. No trash/pencil icons — just links. Selecting the row sets it active.
+ */
+@Composable
+private fun CleanTemplateRow(
+    text: String,
+    selected: Boolean,
+    canDelete: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
     Surface(
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-        color = colors.bubbleGreen,
-        shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) colors.primary.copy(alpha = 0.03f) else colors.surface,
+        border = androidx.compose.foundation.BorderStroke(
+            1.5.dp,
+            if (selected) colors.primary else Color(0xFFEDF0F2)
+        ),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
-            Text(
-                text = body.ifBlank { " " },
-                color = colors.textStrong,
-                fontSize = 18.sp,
-                lineHeight = 29.sp,
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Custom radio dot (filled ring when selected), matching the HTML .radio-custom.
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onEditBody)
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // The card itself, tappable to edit its fields. When detached it disappears
-            // from the message and only the switch line remains, so the toggle stays reachable.
-            if (cardAttached) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.surface.copy(alpha = 0.85f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onEditCard)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
+                    .padding(top = 2.dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) colors.primary else Color.Transparent)
+                    .border(2.dp, if (selected) colors.primary else Color(0xFFC1C7CB), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.White))
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text, fontSize = 14.sp, lineHeight = 19.sp, color = colors.textStrong, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "ערוך",
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable(onClick = onEdit)
+                    )
+                    // The last remaining variant cannot be deleted — a moment always keeps one.
+                    if (canDelete) {
                         Text(
-                            text = card.fullName.ifBlank { "הוסף את שמך" },
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 16.sp,
-                            color = if (card.fullName.isBlank()) {
-                                colors.textFaint
-                            } else {
-                                colors.textStrong
-                            }
+                            "מחק",
+                            color = colors.danger,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            modifier = Modifier.clickable(onClick = onDelete)
                         )
-                        if (card.org.isNotBlank()) {
-                            Text(
-                                text = card.org,
-                                fontSize = 14.sp,
-                                color = colors.textMuted
-                            )
-                        }
-                        if (card.phone.isNotBlank()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    AccessibilityIcons.Call,
-                                    contentDescription = null,
-                                    tint = colors.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = card.phone,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.primary
-                                )
-                            }
-                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "מצורף",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = colors.textMuted
-                )
-                Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
             }
         }
     }
@@ -1807,7 +1747,7 @@ private fun HomeScreen(
 
 /**
  * MASTER CARD — dark gradient card (HOME.html .master-card) carrying the real master kill-switch.
- * Title "זיהוי שיחות פועל ✔", teal subtitle, and the switch (→ global isEnabled). Master OFF dims
+ * Title "האפליקציה עובדת ברקע", teal subtitle, and the switch (→ global isEnabled). Master OFF dims
  * all three accordion cards and stops all sending (handled by the caller via `active` flags).
  */
 @Composable
@@ -1827,14 +1767,14 @@ private fun HomeMasterCard(checked: Boolean, onToggle: () -> Unit) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "זיהוי שיחות פועל ✔",
+                    "האפליקציה עובדת ברקע",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    "הודעות המשך יישלחו אוטומטית",
+                    "מזהה שיחות ומכינה הודעות המשך",
                     color = Color(0xFF17B3A3),
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp
@@ -2067,7 +2007,7 @@ private fun HomeAccordionCard(
                             modifier = Modifier.clickable(onClick = onEdit)
                         ) {
                             Text(
-                                text = "✏️ עריכת נוסח ההודעה",
+                                text = "✏️ עריכה והגדרות",
                                 color = colors.primary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
