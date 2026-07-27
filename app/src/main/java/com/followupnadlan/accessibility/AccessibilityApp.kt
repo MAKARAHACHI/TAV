@@ -714,6 +714,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             body = editingTemplate.body,
                             signature = signaturePreview,
                             cardAttached = cardAttached,
+                            cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
+                                card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
+                                    .joinToString("") { it.take(1) }.ifBlank { "דל" }
+                            },
+                            cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" },
                             onToggleCardAttached = {
                                 cardAttached = !cardAttached
                                 endedCardSettings.cardAttached = cardAttached
@@ -1395,15 +1400,18 @@ private fun HomeScreen(
         }
 
         // Master toggle card (HOME.html .master-card) — the real bridging on/off switch.
+        // USER OVERRIDE #2: background recolored from the HTML's dark near-black gradient to the
+        // support page's teal health-banner gradient, so it reads as "system running properly".
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = colors.heading,
+            color = Color.Transparent,
             shadowElevation = 6.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(Brush.linearGradient(listOf(Color(0xFF17B3A3), Color(0xFF128C7E))))
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1412,7 +1420,7 @@ private fun HomeScreen(
                     Text("מצב אוטומטי", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                     Text(
                         if (missedEnabled) "האפליקציה עובדת ברקע" else "כבוי — לקוחות לא יקבלו הודעה",
-                        color = colors.green,
+                        color = Color.White.copy(alpha = 0.9f),
                         fontWeight = FontWeight.Medium,
                         fontSize = 13.sp
                     )
@@ -1421,11 +1429,8 @@ private fun HomeScreen(
             }
         }
 
-        // Stats — not-wired example numbers (plan v2 §3: no DB-backed counters yet).
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HomeStatBox(value = "4", label = "לקוחות ניצלו היום", modifier = Modifier.weight(1f))
-            HomeStatBox(value = "12", label = "הודעות נשלחו השבוע", modifier = Modifier.weight(1f))
-        }
+        // USER OVERRIDE #1: stats-grid ("לקוחות ניצלו היום"=4, "הודעות נשלחו השבוע"=12) deleted
+        // entirely — removed, not placeholdered — so master-card and message cards sit together.
 
         Text("ההודעות שלך", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = colors.heading)
 
@@ -1455,17 +1460,6 @@ private fun HomeScreen(
 }
 
 private data class HomeCardPreview(val initials: String, val line1: String)
-
-@Composable
-private fun HomeStatBox(value: String, label: String, modifier: Modifier = Modifier) {
-    val colors = AccessibilityExtra.colors
-    AppCard(modifier = modifier, cornerRadius = 20) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(value, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp, color = colors.primary)
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = colors.textMuted)
-        }
-    }
-}
 
 /** The ⚠️ line: what the client is experiencing, and the way to fix it. */
 @Composable
@@ -4076,12 +4070,16 @@ private fun SmartRulesScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("🚫 רשימה שחורה אישית", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
-                    Text(
-                        "${exclusionsPreview.count} מספרים",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = AccessibilityColors.Danger
-                    )
+                    // blacklist-count pill (smart-rules.html .blacklist-count): bg #fee2e2, red text.
+                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFEE2E2)) {
+                        Text(
+                            "${exclusionsPreview.count} מספרים",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFEF4444),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
         }

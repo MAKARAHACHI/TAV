@@ -88,6 +88,14 @@ internal fun HistoryScreen(logStore: FollowUpLogStore, onBack: () -> Unit) {
                 color = AccessibilityColors.Heading,
                 modifier = Modifier.weight(1f)
             )
+            // Search icon (history.html nav-bar right button) — decorative, no handler in the
+            // HTML either; drawn for fidelity.
+            Icon(
+                AccessibilityIcons.Search,
+                contentDescription = "חיפוש",
+                tint = AccessibilityColors.IconDark,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         Row(

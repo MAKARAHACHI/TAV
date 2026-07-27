@@ -33,8 +33,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The three display tags edit.html/edit-after-call.html let the user insert into the body. */
-private val editorTags = listOf("[השם שלי]", "[תפקיד]", "[שם העסק]")
+/** edit.html tag set (missed): name / role / business. */
+private val missedEditorTags = listOf("[השם שלי]", "[תפקיד]", "[שם העסק]")
+
+/** edit-after-call.html tag set (ended): name / role / link. */
+private val endedEditorTags = listOf("[השם שלי]", "[תפקיד]", "[לינק]")
 
 /**
  * Full-screen message editor matching edit.html ("אם לא עניתי") / edit-after-call.html
@@ -52,6 +55,8 @@ internal fun MessageEditorScreen(
     body: String,
     signature: String,
     cardAttached: Boolean,
+    cardInitials: String = "דל",
+    cardLine1: String = "דני לוי",
     onToggleCardAttached: (() -> Unit)?,
     onSave: (String) -> Unit,
     onBack: () -> Unit
@@ -130,14 +135,48 @@ internal fun MessageEditorScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(signature, fontSize = 13.sp, lineHeight = 20.sp, color = AccessibilityColors.TextMuted)
                         }
+                        // vCard preview inside the bubble (edit-after-call.html .vcard-preview) —
+                        // avatar initials + name + "איש קשר (.vcf)" + chevron. Shown/hidden live
+                        // by the vCard toggle exactly like the HTML script.
                         if (isEnded && cardAttached) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "📇 איש קשר (.vcf) מצורף",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AccessibilityColors.TextMuted
-                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(AccessibilityColors.Surface)
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.linearGradient(
+                                                listOf(
+                                                    androidx.compose.ui.graphics.Color(0xFF17B3A3),
+                                                    androidx.compose.ui.graphics.Color(0xFF128C7E)
+                                                )
+                                            )
+                                        ),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(cardInitials, color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(cardLine1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
+                                    Text("איש קשר (.vcf)", fontSize = 12.sp, color = AccessibilityColors.TextMuted)
+                                }
+                                Icon(
+                                    AccessibilityIcons.ChevronStart,
+                                    contentDescription = null,
+                                    tint = androidx.compose.ui.graphics.Color(0xFF128C7E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -164,7 +203,7 @@ internal fun MessageEditorScreen(
                         Text("הוסף משתנה חכם:", fontSize = 13.sp, color = AccessibilityColors.TextMuted)
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            editorTags.forEach { tag ->
+                            (if (isEnded) endedEditorTags else missedEditorTags).forEach { tag ->
                                 TagButton(tag = tag, onClick = { draft = "$draft $tag" })
                             }
                         }
