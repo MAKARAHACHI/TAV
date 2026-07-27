@@ -25,6 +25,21 @@ class RecipientScopeSettings(context: Context) {
             preferences.edit().putString(KEY_SCOPE, value.name).apply()
         }
 
+    /**
+     * The per-moment override under the "override-on-default" model: `null` = "כמו הכללי" (follow
+     * the general default), a concrete [RecipientScope] = this moment overrides the general default.
+     * Absent storage reads as `null`, so an untouched install now follows the general default.
+     * Backed by the same key as [scope]; the codec turns a concrete choice into its enum name.
+     */
+    var scopeOverride: RecipientScope?
+        get() = RecipientScopeCodec.decode(preferences.getString(KEY_SCOPE, null))
+        set(value) {
+            preferences.edit().apply {
+                val encoded = RecipientScopeCodec.encode(value)
+                if (encoded == null) remove(KEY_SCOPE) else putString(KEY_SCOPE, encoded)
+            }.apply()
+        }
+
     companion object {
         /**
          * MVP-1 default: only people who aren't saved in the user's contacts. Auto-answering a

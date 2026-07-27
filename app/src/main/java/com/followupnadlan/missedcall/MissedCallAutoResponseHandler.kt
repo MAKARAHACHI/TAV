@@ -10,6 +10,8 @@ import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.accessibility.ExclusionsStore
 import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.BlockedRecipientGroup
+import com.followupnadlan.accessibility.EffectiveRecipientScope
+import com.followupnadlan.accessibility.GeneralRecipientScopeSettings
 import com.followupnadlan.accessibility.LocalMomentResolver
 import com.followupnadlan.accessibility.RecipientScope
 import com.followupnadlan.accessibility.RecipientScopeSettings
@@ -44,6 +46,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val whatsAppReplySender = WhatsAppReplySender(context)
     private val whatsAppAutoSendController = WhatsAppAutoSendController(context)
     private val recipientScopeSettings = RecipientScopeSettings(context)
+    private val generalRecipientScopeSettings = GeneralRecipientScopeSettings(context)
     private val exclusionsStore = ExclusionsStore(context)
     private val allowedRecipientsStore = AllowedRecipientsStore(context)
     private val contactVerifier = ContactVerifier(context)
@@ -441,7 +444,14 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         manualFallbackAvailable = settings.manualSmsFallbackEnabled && canShowManualFallback(normalizedPhone ?: phone, message),
         cooldownMillis = settings.cooldownMillis,
         excluded = exclusionsStore.isExcluded(normalizedPhone ?: phone),
-        recipientMode = when (recipientScopeSettings.scope) {
+        // Override-on-default: the missed moment's per-moment override wins, else the general
+        // default. Resolved here at the call site; the decision logic is unchanged.
+        recipientMode = when (
+            EffectiveRecipientScope.of(
+                recipientScopeSettings.scopeOverride,
+                generalRecipientScopeSettings.scope
+            )
+        ) {
             RecipientScope.ANY_NUMBER -> MissedCallRecipientMode.ANY_NUMBER
             RecipientScope.CONTACTS_ONLY -> MissedCallRecipientMode.CONTACTS_ONLY
             RecipientScope.NON_CONTACTS_ONLY -> MissedCallRecipientMode.NON_CONTACTS_ONLY

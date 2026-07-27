@@ -205,6 +205,14 @@ internal object HomeMessagePreviewLogic {
 internal enum class MomentApprovalMode { AUTOMATIC, MANUAL }
 
 /**
+ * Which moment an edit page is showing. Drives two per-moment differences on the page:
+ *  - Automatic send is offered ONLY for [MISSED] (the user is away from the phone); [ENDED] and
+ *    [NO_ANSWER] happen while holding the phone, so their approval row is a locked "ידני · באישור שלך".
+ *  - Each kind writes its "מי יקבל" override to its own store.
+ */
+internal enum class MomentEditKind { MISSED, ENDED, NO_ANSWER }
+
+/**
  * Pure mapping between the moment edit page's "אישור לפני שליחה" select and the engine's existing
  * automation flags. Kept engine-agnostic (returns the flag pair) so it can be asserted in a test
  * without touching SharedPreferences.
@@ -255,6 +263,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val logStore = remember(context) { FollowUpLogStore(appContext) }
     val recipientScopeSettings = remember(context) { RecipientScopeSettings(appContext) }
     val endedScopeSettings = remember(context) { EndedScopeSettings(appContext) }
+    val noAnswerScopeSettings = remember(context) { NoAnswerScopeSettings(appContext) }
+    val generalScopeSettings = remember(context) { GeneralRecipientScopeSettings(appContext) }
     val endedCardSettings = remember(context) { EndedCardSettings(appContext) }
     val cooldownSettings = remember(context) { FollowUpCooldownSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
@@ -309,6 +319,12 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
     // The ended moment's own scope — a separate decision from missed (different jobs, §4).
     var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
+    // Override-on-default model. The general default (Smart-Rules) that every moment falls back to
+    // while it stays on "כמו הכללי", plus each moment's per-moment override (null = follow general).
+    var generalScope by remember { mutableStateOf(generalScopeSettings.scope) }
+    var missedScopeOverride by remember { mutableStateOf(recipientScopeSettings.scopeOverride) }
+    var endedScopeOverride by remember { mutableStateOf(endedScopeSettings.scopeOverride) }
+    var noAnswerScopeOverride by remember { mutableStateOf(noAnswerScopeSettings.scopeOverride) }
     var cardAttached by remember { mutableStateOf(endedCardSettings.cardAttached) }
     // The single explicit channel choice, read back from the engine's flag pair.
     var selectedChannel by remember { mutableStateOf(FollowUpChannelSettings.current(settings)) }
@@ -427,6 +443,31 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             settings.cooldownMillis = 0L
         }
     }
+
+    // Shared moment-edit handler: pick "מי יקבל את ההודעה?" for a moment. null = "כמו הכללי" (follow
+    // the general default); a concrete scope = a per-moment override. Written to the moment's own
+    // store (missed/ended/no-answer). Choosing "רק אנשים שאבחר" opens the choose-people flow, matching
+    // the existing behavior — the list is meaningless until it exists.
+    fun onMomentSelectScope(kind: MomentEditKind, scope: RecipientScope?) {
+        when (kind) {
+            MomentEditKind.MISSED -> {
+                missedScopeOverride = scope
+                recipientScopeSettings.scopeOverride = scope
+            }
+            MomentEditKind.ENDED -> {
+                endedScopeOverride = scope
+                endedScopeSettings.scopeOverride = scope
+            }
+            MomentEditKind.NO_ANSWER -> {
+                noAnswerScopeOverride = scope
+                noAnswerScopeSettings.scopeOverride = scope
+            }
+        }
+        if (scope == RecipientScope.ONLY_SELECTED) {
+            modal = AccessibilityModal.ALLOWED_RECIPIENTS
+        }
+    }
+
     val callDetectionPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -831,6 +872,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         )
                         MomentEditScreen(
                             title = "אם לא עניתי",
+                            kind = MomentEditKind.MISSED,
                             isEnabled = missedMomentEnabled,
                             signature = signaturePreview,
                             time = "10:42",
@@ -840,6 +882,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
+                            scopeOverride = missedScopeOverride,
                             variants = momentVariantsFor(TemplateRole.MISSED_CALL),
                             onToggleEnabled = {
                                 missedMomentEnabled = !missedMomentEnabled
@@ -848,7 +891,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
-                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
+                            onSelectScope = { onMomentSelectScope(MomentEditKind.MISSED, it) },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -859,6 +902,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         )
                         MomentEditScreen(
                             title = "אחרי שדיברנו",
+                            kind = MomentEditKind.ENDED,
                             isEnabled = endedMomentEnabled,
                             signature = signaturePreview,
                             time = "11:05",
@@ -868,6 +912,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
+                            scopeOverride = endedScopeOverride,
                             variants = momentVariantsFor(TemplateRole.CALL_ENDED),
                             onToggleEnabled = {
                                 endedMomentEnabled = !endedMomentEnabled
@@ -876,7 +921,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
-                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
+                            onSelectScope = { onMomentSelectScope(MomentEditKind.ENDED, it) },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -887,6 +932,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         )
                         MomentEditScreen(
                             title = "לא ענו לי",
+                            kind = MomentEditKind.NO_ANSWER,
                             isEnabled = noAnswerMomentEnabled,
                             signature = signaturePreview,
                             time = "12:30",
@@ -896,6 +942,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             frequencyLimitOn = frequencyLimitOn,
+                            scopeOverride = noAnswerScopeOverride,
                             variants = momentVariantsFor(TemplateRole.NO_ANSWER_OUTGOING),
                             onToggleEnabled = {
                                 noAnswerMomentEnabled = !noAnswerMomentEnabled
@@ -904,7 +951,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
-                            onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
+                            onSelectScope = { onMomentSelectScope(MomentEditKind.NO_ANSWER, it) },
                             onBack = { modal = AccessibilityModal.NONE }
                         )
                     }
@@ -948,7 +995,15 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     AccessibilityModal.SMART_RULES -> SmartRulesScreen(
                         workingHoursSettings = workingHoursSettings,
                         exclusionsStore = exclusionsStore,
-                        recipientScope = recipientScope,
+                        generalScope = generalScope,
+                        onSelectGeneralScope = { scope ->
+                            generalScope = scope
+                            generalScopeSettings.scope = scope
+                            // "רק אנשים שאבחר" needs a list to mean anything — go build it.
+                            if (scope == RecipientScope.ONLY_SELECTED) {
+                                modal = AccessibilityModal.ALLOWED_RECIPIENTS
+                            }
+                        },
                         exclusionsPreview = remember(recipientsRefresh) {
                             RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label })
                         },
@@ -1240,6 +1295,7 @@ private fun <T> JourneyOptionPickerDialog(
 @Composable
 private fun MomentEditScreen(
     title: String,
+    kind: MomentEditKind,
     isEnabled: Boolean,
     signature: String,
     time: String,
@@ -1249,12 +1305,13 @@ private fun MomentEditScreen(
     selectedChannel: FollowUpChannel,
     approvalMode: MomentApprovalMode,
     frequencyLimitOn: Boolean,
+    scopeOverride: RecipientScope?,
     variants: MomentVariants,
     onToggleEnabled: () -> Unit,
     onSelectChannel: (FollowUpChannel) -> Unit,
     onSelectApprovalMode: (MomentApprovalMode) -> Unit,
     onToggleFrequencyLimit: () -> Unit,
-    onOpenSmartRules: () -> Unit,
+    onSelectScope: (RecipientScope?) -> Unit,
     onBack: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
@@ -1398,36 +1455,47 @@ private fun MomentEditScreen(
                     )
                 }
 
-                // אישור לפני שליחה — אוטומטי (ללא אישור) / ידני (באישור שלי).
+                // אישור לפני שליחה — automatic send is offered ONLY for the missed moment (the user
+                // is away). Ended + no-answer happen while holding the phone, so they are ALWAYS
+                // manual: a locked "ידני · באישור שלך" info row, no select. This only changes what the
+                // page shows; the underlying automation flag still affects the missed path only.
                 SettingRow(
                     title = "אישור לפני שליחה",
                     subtitle = "האם לשלוח לבד או לבקש אישור",
                     showDivider = true
                 ) {
-                    SettingSelect(
-                        selectedLabel = approvalModeLabel(approvalMode),
-                        options = listOf(
-                            MomentApprovalMode.AUTOMATIC to approvalModeLabel(MomentApprovalMode.AUTOMATIC),
-                            MomentApprovalMode.MANUAL to approvalModeLabel(MomentApprovalMode.MANUAL)
-                        ),
-                        onSelect = onSelectApprovalMode
-                    )
+                    if (kind == MomentEditKind.MISSED) {
+                        SettingSelect(
+                            selectedLabel = approvalModeLabel(approvalMode),
+                            options = listOf(
+                                MomentApprovalMode.AUTOMATIC to approvalModeLabel(MomentApprovalMode.AUTOMATIC),
+                                MomentApprovalMode.MANUAL to approvalModeLabel(MomentApprovalMode.MANUAL)
+                            ),
+                            onSelect = onSelectApprovalMode
+                        )
+                    } else {
+                        // Locked, static: this moment never sends by itself.
+                        Text(
+                            "ידני · באישור שלך",
+                            color = colors.textMuted,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
 
-                // מי יקבל את ההודעה? — managed in smart-rules; deep-link there (no duplicate picker).
+                // מי יקבל את ההודעה? — real per-moment picker. "כמו הכללי" (null) follows the general
+                // default set in Smart-Rules; any concrete scope is a per-moment override.
                 SettingRow(
                     title = "מי יקבל את ההודעה?",
-                    subtitle = "מנוהל בהגדרות החכמות",
+                    subtitle = "אפשר לעקוב אחרי הכלל הכללי או לבחור לרגע הזה",
                     showDivider = true
                 ) {
-                    Row(
-                        modifier = Modifier.clickable(onClick = onOpenSmartRules),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text("פתח הגדרות חכמות", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("›", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
+                    SettingSelect(
+                        selectedLabel = momentScopeLabel(scopeOverride),
+                        options = momentScopeOptions(),
+                        onSelect = onSelectScope
+                    )
                 }
 
                 // הגבלת תדירות — "אל תשלח שוב לאותו אדם במשך 24 שעות" → cooldown setting.
@@ -1448,6 +1516,20 @@ private fun approvalModeLabel(mode: MomentApprovalMode): String = when (mode) {
     MomentApprovalMode.AUTOMATIC -> "אוטומטי (ללא אישור)"
     MomentApprovalMode.MANUAL -> "ידני (באישור שלי)"
 }
+
+/**
+ * Hebrew label for the per-moment "מי יקבל" select. `null` = "כמו הכללי" (follow the general
+ * default); a concrete scope reuses the existing [recipientScopeLabel] wording (no new categories).
+ */
+private fun momentScopeLabel(scope: RecipientScope?): String =
+    if (scope == null) FOLLOW_GENERAL_LABEL else recipientScopeLabel(scope)
+
+/** The per-moment "מי יקבל" options: "כמו הכללי" prepended to the 4 existing categories. */
+private fun momentScopeOptions(): List<Pair<RecipientScope?, String>> =
+    listOf<Pair<RecipientScope?, String>>(null to FOLLOW_GENERAL_LABEL) +
+        RecipientScope.entries.map { it to recipientScopeLabel(it) }
+
+private const val FOLLOW_GENERAL_LABEL = "כמו הכללי"
 
 /**
  * One unified settings row (edit-scenario-fixed.html .setting-row): title + subtitle on the right,
@@ -4265,7 +4347,8 @@ private fun DayCircle(label: String, active: Boolean, onClick: () -> Unit) {
 private fun SmartRulesScreen(
     workingHoursSettings: WorkingHoursSettings,
     exclusionsStore: ExclusionsStore,
-    recipientScope: RecipientScope,
+    generalScope: RecipientScope,
+    onSelectGeneralScope: (RecipientScope) -> Unit,
     exclusionsPreview: RecipientPreview,
     onOpenExclusions: () -> Unit,
     onBack: () -> Unit
@@ -4385,6 +4468,33 @@ private fun SmartRulesScreen(
             }
         }
 
+        // General default recipient scope — "מי מקבל הודעות המשך (ברירת מחדל)". This is the value
+        // every moment falls back to while it stays on "כמו הכללי" (override-on-default).
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(AccessibilityIcons.Shield, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(20.dp))
+                    Text("מי מקבל הודעות המשך (ברירת מחדל)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.Heading)
+                }
+                Text(
+                    "כל רגע יכול לעקוב אחרי הבחירה הזאת, או לבחור אחרת בעצמו.",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = AccessibilityColors.TextMuted
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    SettingSelect(
+                        selectedLabel = recipientScopeLabel(generalScope),
+                        options = RecipientScope.entries.map { it to recipientScopeLabel(it) },
+                        onSelect = onSelectGeneralScope
+                    )
+                }
+            }
+        }
+
         AppCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4398,7 +4508,7 @@ private fun SmartRulesScreen(
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
 
-                val visibleGroups = RecipientRulesUi.visibleBlockGroups(recipientScope)
+                val visibleGroups = RecipientRulesUi.visibleBlockGroups(generalScope)
                 visibleGroups.forEach { group ->
                     SmartRuleToggleRow(
                         title = blockedGroupLabel(group),

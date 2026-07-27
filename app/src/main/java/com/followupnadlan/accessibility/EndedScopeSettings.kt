@@ -27,6 +27,20 @@ class EndedScopeSettings(context: Context) {
             preferences.edit().putString(KEY_SCOPE, value.name).apply()
         }
 
+    /**
+     * The ended moment's per-moment override: `null` = "כמו הכללי" (follow the general default),
+     * a concrete [RecipientScope] = override. Absent storage reads as `null`. Backed by the same
+     * key as [scope]. See [RecipientScopeCodec].
+     */
+    var scopeOverride: RecipientScope?
+        get() = RecipientScopeCodec.decode(preferences.getString(KEY_SCOPE, null))
+        set(value) {
+            preferences.edit().apply {
+                val encoded = RecipientScopeCodec.encode(value)
+                if (encoded == null) remove(KEY_SCOPE) else putString(KEY_SCOPE, encoded)
+            }.apply()
+        }
+
     companion object {
         val DEFAULT_SCOPE = RecipientScope.NON_CONTACTS_ONLY
         private const val PREFERENCES_NAME = "ended_scope_settings"

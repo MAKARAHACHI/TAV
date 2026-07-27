@@ -20,8 +20,11 @@ import android.telephony.TelephonyManager
 import com.followupnadlan.MainActivity
 import com.followupnadlan.R
 import com.followupnadlan.accessibility.AllowedRecipientsStore
+import com.followupnadlan.accessibility.EffectiveRecipientScope
 import com.followupnadlan.accessibility.EndedScopeSettings
 import com.followupnadlan.accessibility.FollowUpCooldownSettings
+import com.followupnadlan.accessibility.GeneralRecipientScopeSettings
+import com.followupnadlan.accessibility.NoAnswerScopeSettings
 import com.followupnadlan.accessibility.LocalMomentResolver
 import com.followupnadlan.accessibility.WorkingHoursDecider
 import com.followupnadlan.accessibility.FollowUpPromptModeLogic
@@ -116,13 +119,26 @@ class CallDetectionService : Service() {
         // the verified ENDED decider owns it for both. Part A adds NO_ANSWER *alongside* — this
         // decider's rules are unchanged.
         val cooldowns = FollowUpCooldownSettings(context)
+        // Which after-call moment is this? Classify BEFORE deciding so each moment can supply its
+        // own recipient scope (ended vs no-answer are separate moments with separate stores). The
+        // classifier is pure and reads only fields already in hand.
+        val moment = EndedMomentClassifier.classify(latestCall.type, latestCall.durationSeconds)
+        // Override-on-default: the moment's per-moment override wins, else the general default.
+        // Resolved here at the call site; EndedSuggestionDecider is unchanged.
+        val generalScope = GeneralRecipientScopeSettings(context).scope
+        val effectiveScope = when (moment) {
+            EndedMoment.NO_ANSWER_OUTGOING ->
+                EffectiveRecipientScope.of(NoAnswerScopeSettings(context).scopeOverride, generalScope)
+            EndedMoment.ENDED ->
+                EffectiveRecipientScope.of(EndedScopeSettings(context).scopeOverride, generalScope)
+        }
         val decision = EndedSuggestionDecider.decide(
             EndedSuggestionInput(
                 callDurationSeconds = latestCall.durationSeconds,
                 phoneNumber = phone,
                 isSavedContact = contactVerifier.isSavedContact(phone),
                 contactsPermissionGranted = contactVerifier.hasContactsPermission(),
-                scope = EndedScopeSettings(context).scope,
+                scope = effectiveScope,
                 allowedNumbers = AllowedRecipientsStore(context).load().map { it.number },
                 lastSuggestedAtEpochMs = suggestionStore.lastSuggestedAt(phone),
                 lastAnyNotificationAtEpochMs = suggestionStore.lastAnyNotificationAt(),
@@ -138,8 +154,8 @@ class CallDetectionService : Service() {
         if (decision != EndedSuggestionDecision.SUGGEST) return
 
         val settings = MissedCallAutoResponseSettings(context)
-        // Which after-call moment is this? An outgoing call with zero duration never connected.
-        when (EndedMomentClassifier.classify(latestCall.type, latestCall.durationSeconds)) {
+        // Route to the moment classified above (an outgoing call with zero duration never connected).
+        when (moment) {
             EndedMoment.NO_ANSWER_OUTGOING -> offerNoAnswer(context, phone, now, latestCall, suggestionStore, settings)
             EndedMoment.ENDED -> offerEnded(context, phone, now, latestCall, suggestionStore, settings)
         }
