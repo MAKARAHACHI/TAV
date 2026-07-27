@@ -204,7 +204,11 @@ data class MissedCallLaunch(
     val message: String = "",
     val fromNotification: Boolean = false,
     /** Raw notification call-type extra ("missed"/"incoming"/"outgoing"); decides the prompt wording. */
-    val callType: String? = null
+    val callType: String? = null,
+    /** Epoch-ms of the call, so the approval sheet can show real relative time ("לפני 3 דקות"). 0 = unknown. */
+    val callTimestampMs: Long = 0L,
+    /** Contact name when the number is saved; blank ⇒ the sheet falls back to the local-formatted phone. */
+    val leadName: String = ""
 )
 
 /**
@@ -800,6 +804,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
 
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
                         phone = missedCallLaunch.phone,
+                        leadName = missedCallLaunch.leadName,
+                        callTimestampMs = missedCallLaunch.callTimestampMs,
                         message = missedCallLaunch.message,
                         mode = FollowUpPromptModeLogic.fromCallType(missedCallLaunch.callType),
                         templates = templates,
@@ -807,10 +813,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         selectedMissedId = selectedMissedId,
                         selectedNoAnswerId = selectedNoAnswerId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
-                        primaryChannel = settings.primaryChannel,
-                        whatsappAvailable = whatsappAvailability.selectedPackage != null,
-                        askBeforeSend = askBeforeSend,
-                        onOpenContactCardSettings = { modal = AccessibilityModal.CONTACT_CARD },
+                        signature = signaturePreview,
+                        cardAttached = cardAttached,
+                        cardName = ContactCard.fromProfile(myDetailsStore.load()).fullName,
                         onDone = { modal = AccessibilityModal.NONE }
                     )
                 }
@@ -2506,10 +2511,37 @@ private fun TemplateCardEditor(
     }
 }
 
-// ===================== SCREEN 4 — MISSED CALL PROMPT =====================
+// ===================== SCREEN 4 — PURE APPROVAL BOTTOM-SHEET =====================
+// "Configure once, execute effortlessly." Reached from a follow-up notification (missed / ended /
+// no-answer). One decision: send the pre-configured message, or not. No chips/toggles/cursor by
+// default — the artifact is shown exactly as it will be sent, read-only, with a discreet "ערוך
+// הודעה" link that reveals an inline textarea + a picker of THIS moment's saved variants. Mirrors
+// quick-send-pure.html. [שלח] sends via the existing verified WhatsApp path (FollowUpPromptSender,
+// which stamps the moment's source so the "היום" count and history pick it up); [לא עכשיו] just
+// dismisses without sending. Replaces the old chips/tags/vCard-toggle editor.
+
+/** The context-header avatar emoji + human sub-line template per moment (matches the HTML). */
+private data class PromptMomentChrome(val emoji: String, val subLinePrefix: String)
+
+private fun promptMomentChrome(mode: FollowUpPromptMode): PromptMomentChrome = when (mode) {
+    FollowUpPromptMode.MISSED_CALL -> PromptMomentChrome("📞", "שיחה שלא נענתה")
+    FollowUpPromptMode.CALL_ENDED -> PromptMomentChrome("🤝", "שיחה שהסתיימה")
+    FollowUpPromptMode.NO_ANSWER_OUTGOING -> PromptMomentChrome("📵", "לא ענו לשיחה שלך")
+}
+
+// Artifact palette locked to the HTML source of truth (the sent WhatsApp bubble), independent of
+// the Home-screen bubble token so the Home palette stays untouched.
+private val PromptSheetBg = Color(0xFFF4F7F6)
+private val PromptChatBg = Color(0xFFEFEAE2)
+private val PromptBubbleGreen = Color(0xFFD9FDD3)
+private val PromptCheckBlue = Color(0xFF53BDEB)
+private val PromptVCardAvatar = Color(0xFF128C7E)
+
 @Composable
 private fun MissedCallPromptScreen(
     phone: String,
+    leadName: String,
+    callTimestampMs: Long,
     message: String,
     mode: FollowUpPromptMode,
     templates: List<MessageTemplate>,
@@ -2517,21 +2549,13 @@ private fun MissedCallPromptScreen(
     selectedMissedId: String,
     selectedNoAnswerId: String,
     preferredWhatsAppPackage: String,
-    primaryChannel: MissedCallResponsePrimaryChannel,
-    whatsappAvailable: Boolean,
-    askBeforeSend: Boolean,
-    onOpenContactCardSettings: () -> Unit,
+    signature: String,
+    cardAttached: Boolean,
+    cardName: String,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
-    // Contact-card share is independent of the message send: it reuses the saved "my details"
-    // and opens WhatsApp with a .vcf attached; the user picks the chat and taps send themselves.
-    val shareContactCard = remember(context) { PrepareAndShareContactCard(context) }
-    val contactCardComplete = remember(context) {
-        ContactCard.fromProfile(MyDetailsStore(context.applicationContext).load()).isComplete
-    }
-    // Wording follows the call scenario: a missed call uses the "missed" cards, a completed
-    // call the "call ended" cards, an outgoing-not-answered call the "לא ענו" cards (Part A).
+
     val role = when (mode) {
         FollowUpPromptMode.MISSED_CALL -> TemplateRole.MISSED_CALL
         FollowUpPromptMode.NO_ANSWER_OUTGOING -> TemplateRole.NO_ANSWER_OUTGOING
@@ -2543,376 +2567,316 @@ private fun MissedCallPromptScreen(
         TemplateRole.NO_ANSWER_OUTGOING -> selectedNoAnswerId
         TemplateRole.CALL_ENDED -> selectedEndedId
     }
-    // Manual "ask me" mode with more than one card of this role lets the user pick a different
-    // card for this send only (it does not change the saved default).
-    val showSelector = askBeforeSend && roleTemplates.size > 1
     val defaultTemplate = TemplateRoleSelector.forRole(templates, role, selectedIdForRole)
-    var activeId by remember(selectedIdForRole, role) { mutableStateOf(defaultTemplate?.id.orEmpty()) }
-    val activeTemplate = roleTemplates.firstOrNull { it.id == activeId }
-        ?: defaultTemplate
-    val templateMessage = if (showSelector) {
-        activeTemplate?.let { MessageComposition.build(it) }.orEmpty()
-    } else {
-        message.ifBlank { activeTemplate?.let { MessageComposition.build(it) }.orEmpty() }
-    }
-    // A per-call, in-place edit that is NOT saved to the store — it only tailors this one
-    // send. It resets whenever the underlying template message changes (e.g. picking a chip).
-    var localEdit by remember(templateMessage) { mutableStateOf<String?>(null) }
+    // The active variant body drives the artifact. The message passed from the notification wins
+    // when present (it is the exact text that was prepared); otherwise fall back to the active variant.
+    val activeBody = message.ifBlank { defaultTemplate?.let { MessageComposition.build(it) }.orEmpty() }
+
+    // A one-off edit / variant pick for THIS send only; never saved to the store.
     var editing by remember { mutableStateOf(false) }
-    val resolvedMessage = localEdit ?: templateMessage
-    val normalizedPhone = remember(phone) { PhoneNumberNormalizer.normalizeForWhatsApp(phone) }
+    var draft by remember(activeBody) { mutableStateOf(activeBody) }
+    val resolvedMessage = draft
     var status by remember { mutableStateOf<String?>(null) }
 
-    // The primary button + header channel are one and the same (plan §1): resolve once, use
-    // the same name in both. The card add-on is a completed-call action only (§4 / §3ה) — the
-    // missed-call screen never shows it. In a completed call the message field is the main
-    // action, so it opens for editing immediately (§3ד).
-    val channelResolution = remember(primaryChannel, whatsappAvailable) {
-        FollowUpChannelResolver.resolve(primaryChannel, whatsappAvailable)
+    val chrome = promptMomentChrome(mode)
+    val recipient = leadName.trim().ifBlank {
+        phone.takeIf { it.isNotBlank() }?.let { PhoneNumberNormalizer.toLocalIsraeliDisplay(it) } ?: "מספר לא ידוע"
     }
-    // No conversation happened on a missed or a no-answer call, so both use the missed layout:
-    // a generic bubble with editing behind a button, and no completed-call contact-card add-on.
-    val isMissed = mode == FollowUpPromptMode.MISSED_CALL || mode == FollowUpPromptMode.NO_ANSWER_OUTGOING
-    val showContactCard = mode == FollowUpPromptMode.CALL_ENDED
-    val missingNumber = isMissed && normalizedPhone == null
-    // "אפשרויות נוספות" offers the other channel for this one send.
-    var showMoreOptions by remember { mutableStateOf(false) }
-
-    fun openWhatsApp() {
-        if (normalizedPhone == null || resolvedMessage.isBlank()) {
-            status = "חסר מספר תקין או נוסח הודעה."
-            return
-        }
-        val result = AccessibilityActions.openWhatsApp(
-            context,
-            WhatsAppLinkBuilder.build(normalizedPhone, resolvedMessage),
-            preferredWhatsAppPackage
-        )
-        if (result == null) {
-            AccessibilityActions.logEntry(context, com.followupnadlan.followuplog.FollowUpActionType.WHATSAPP_OPENED, resolvedMessage, phone)
-            onDone()
-        } else {
-            status = result
-        }
+    // Real relative time for {X}. When the notification carried no timestamp, fall back to "עכשיו".
+    val subLine = remember(callTimestampMs, chrome.subLinePrefix) {
+        val rel = if (callTimestampMs > 0L) RelativeTimeHebrew.of(callTimestampMs, System.currentTimeMillis()) else "עכשיו"
+        "${chrome.subLinePrefix} $rel"
+    }
+    // The static vCard element is drawn in the bubble only for the ended moment when the card is on.
+    val showVCard = mode == FollowUpPromptMode.CALL_ENDED && cardAttached && cardName.isNotBlank()
+    val metaTime = remember(callTimestampMs) {
+        val ms = if (callTimestampMs > 0L) callTimestampMs else System.currentTimeMillis()
+        java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }
 
-    fun openSms() {
-        if (phone.isBlank() || resolvedMessage.isBlank()) {
-            status = "חסר מספר או נוסח הודעה."
-            return
-        }
-        val result = AccessibilityActions.openSmsComposer(context, phone, resolvedMessage)
-        if (result == null) {
-            onDone()
-        } else {
-            status = result
-        }
+    fun send() {
+        val error = FollowUpPromptSender.send(context, mode, phone, resolvedMessage, preferredWhatsAppPackage)
+        if (error == null) onDone() else status = error
     }
 
-    fun runPrimary() {
-        when (channelResolution.channel) {
-            FollowUpSendChannel.WHATSAPP -> openWhatsApp()
-            FollowUpSendChannel.SMS -> openSms()
-        }
-    }
-
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(Color(0x99111B21))
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            ) { onDone() },
+        contentAlignment = Alignment.BottomCenter
     ) {
-        IconBadge(
-            icon = if (mode == FollowUpPromptMode.CALL_ENDED) AccessibilityIcons.PhoneInTalk else AccessibilityIcons.PhoneMissed,
-            background = AccessibilityColors.PrimaryContainer,
-            tint = AccessibilityColors.Primary,
-            boxSize = 92,
-            cornerRadius = 46,
-            iconSize = 48
-        )
-        Spacer(modifier = Modifier.height(18.dp))
-        Text(FollowUpPromptModeLogic.title(mode), fontWeight = FontWeight.ExtraBold, fontSize = 23.sp, color = AccessibilityColors.Heading)
-
-        // "רואים למי + באיזה ערוץ" (plan §1) — the recipient and the channel are the first
-        // thing on the screen, and the channel name here is identical to the primary button.
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("אל:", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = AccessibilityColors.TextMuted)
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = phone.ifBlank { "מספר לא ידוע" },
-            fontWeight = FontWeight.Bold,
-            fontSize = 24.sp,
-            color = AccessibilityColors.TextStrong
-        )
-        if (!missingNumber) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(
-                    imageVector = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityIcons.Chat else AccessibilityIcons.Sms,
-                    contentDescription = null,
-                    tint = AccessibilityColors.Primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = channelResolution.channelName,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = AccessibilityColors.Primary
-                )
-            }
-        }
-
-        if (missingNumber) {
-            // Missed call with no usable number → nothing can be sent; offer only to close (§4).
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                text = "מספר לא ידוע — אי אפשר לשלוח",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = AccessibilityColors.Danger,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinePillButton(text = "ביטול", onClick = onDone)
-            return@Column
-        }
-
-        if (showSelector) {
-            Spacer(modifier = Modifier.height(16.dp))
-            TemplateChipRow(
-                templates = roleTemplates,
-                selectedId = activeId,
-                onSelect = { activeId = it },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        if (isMissed) {
-            // Missed call: the user wasn't in a conversation, so a generic message is enough —
-            // the bubble shows it and editing stays a secondary action (§3ד distinction).
-            WhatsAppMessagePreview(message = resolvedMessage, maxLines = 8)
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinePillButton(
-                text = "ערוך הודעה",
-                onClick = { editing = true },
-                borderColor = AccessibilityColors.Primary,
-                contentColor = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.Edit
-            )
-        } else {
-            // Completed call: the user just spoke and has context, so editing is the main action —
-            // the field is open for immediate editing, not hidden behind a button (§3ד).
-            OutlinedTextField(
-                value = resolvedMessage,
-                onValueChange = { localEdit = it },
-                label = { Text("ההודעה שתישלח") },
-                minLines = 4,
-                maxLines = 10,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "עריכה זו מתאימה את ההודעה לשיחה הזו בלבד ואינה נשמרת כברירת מחדל.",
-            fontSize = 12.sp,
-            color = AccessibilityColors.TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // One primary button matching the chosen channel (plan §1) — its label is identical to
-        // the channel name shown in the header above.
-        PillButton(
-            text = channelResolution.primaryButtonText,
-            onClick = { runPrimary() },
-            background = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityColors.Green else AccessibilityColors.Primary,
-            leadingIcon = if (channelResolution.channel == FollowUpSendChannel.WHATSAPP) AccessibilityIcons.Chat else AccessibilityIcons.Sms
-        )
-
-        // "אפשרויות נוספות" — the other channel for this one send only.
-        Spacer(modifier = Modifier.height(11.dp))
-        if (!showMoreOptions) {
-            OutlinePillButton(
-                text = "אפשרויות נוספות",
-                onClick = { showMoreOptions = true },
-                borderColor = AccessibilityColors.Primary,
-                contentColor = AccessibilityColors.Primary
-            )
-        } else {
-            val otherIsWhatsApp = channelResolution.channel == FollowUpSendChannel.SMS
-            PillButton(
-                text = if (otherIsWhatsApp) "פתח ${FollowUpChannelResolver.WHATSAPP_NAME}" else "פתח ${FollowUpChannelResolver.SMS_NAME}",
-                onClick = { if (otherIsWhatsApp) openWhatsApp() else openSms() },
-                background = AccessibilityColors.Primary,
-                leadingIcon = if (otherIsWhatsApp) AccessibilityIcons.Chat else AccessibilityIcons.Sms
-            )
-        }
-
-        // Contact-card share — completed-call flow only (§4 / §3ה): a separate clean vCard share.
-        if (showContactCard) {
-            Spacer(modifier = Modifier.height(11.dp))
-            PillButton(
-                text = "צרף את הכרטיס שלי",
-                enabled = contactCardComplete,
-                onClick = {
-                    when (val result = shareContactCard(preferredWhatsAppPackage)) {
-                        is ContactCardShareResult.Opened -> status = null
-                        ContactCardShareResult.IncompleteProfile -> onOpenContactCardSettings()
-                        is ContactCardShareResult.Failed -> status = result.userMessage
-                    }
-                },
-                background = AccessibilityColors.Primary,
-                leadingIcon = AccessibilityIcons.PersonAdd
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            if (contactCardComplete) {
-                Text(
-                    text = "ייפתח WhatsApp עם הכרטיס — בחר/י את השיחה ולחץ/י שלח.",
-                    fontSize = 12.sp,
-                    color = AccessibilityColors.TextMuted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            } else {
-                Text(
-                    text = "מלא/י שם וטלפון בהפרטים שלי כדי לצרף כרטיס.",
-                    fontSize = 12.sp,
-                    color = AccessibilityColors.TextMuted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinePillButton(
-                    text = "מילוי פרטי הכרטיס",
-                    onClick = onOpenContactCardSettings,
-                    borderColor = AccessibilityColors.Primary,
-                    contentColor = AccessibilityColors.Primary,
-                    leadingIcon = AccessibilityIcons.PersonAdd
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(11.dp))
-        OutlinePillButton(text = if (isMissed) "ביטול" else "לא הפעם", onClick = onDone)
-        status?.let {
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp)
-        }
-    }
-
-    if (editing) {
-        FollowUpMessageEditorDialog(
-            message = resolvedMessage,
-            onSave = { edited ->
-                localEdit = edited
-                editing = false
-            },
-            onCancel = { editing = false }
-        )
-    }
-}
-
-/**
- * Quick, per-call message editor for the follow-up prompt. Unlike the Home editor, the result
- * is NOT persisted — it only tailors the current send, so the copy makes that explicit.
- */
-@Composable
-private fun FollowUpMessageEditorDialog(
-    message: String,
-    onSave: (String) -> Unit,
-    onCancel: () -> Unit
-) {
-    var draft by remember(message) { mutableStateOf(message) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun saveDraft() {
-        if (draft.isBlank()) {
-            error = "ההודעה לא יכולה להיות ריקה"
-            return
-        }
-        onSave(draft)
-    }
-
-    AlertDialog(
-        modifier = Modifier
-            .imePadding()
-            .navigationBarsPadding(),
-        onDismissRequest = onCancel,
-        title = { Text("עריכת ההודעה לשיחה זו", fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "השינוי מתאים את ההודעה לשיחה הנוכחית בלבד ואינו נשמר כברירת מחדל.",
-                    color = AccessibilityColors.TextMuted,
-                    fontSize = 14.sp
-                )
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = {
-                        draft = it
-                        error = null
-                    },
-                    minLines = 6,
-                    maxLines = 10,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 180.dp, max = 310.dp)
-                )
-                error?.let { Text(it, color = AccessibilityColors.Danger, fontSize = 13.sp) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { saveDraft() }) {
-                Text("שמור לשיחה זו", fontWeight = FontWeight.Bold, color = AccessibilityColors.Primary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text("ביטול", color = AccessibilityColors.TextBody)
-            }
-        }
-    )
-}
-
-/** Horizontal, scrollable row of selectable template chips (by title). */
-@Composable
-private fun TemplateChipRow(
-    templates: List<MessageTemplate>,
-    selectedId: String,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        templates.forEach { template ->
-            val selected = template.id == selectedId
-            Surface(
-                shape = RoundedCornerShape(999.dp),
-                color = if (selected) AccessibilityColors.Primary else AccessibilityColors.SubtleSurface,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.5.dp,
-                    if (selected) AccessibilityColors.Primary else AccessibilityColors.CardBorder
-                ),
-                modifier = Modifier.clickable { onSelect(template.id) }
+        Surface(
+            color = PromptSheetBg,
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                ) { /* swallow taps on the sheet so they don't dismiss */ }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                Text(
-                    text = template.title,
-                    color = if (selected) Color.White else AccessibilityColors.TextBody,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                // Drag handle
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFFC1C7CB))
+                        .align(Alignment.CenterHorizontally)
                 )
+
+                // Context header: avatar + recipient + human sub-line with real relative time.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(chrome.emoji, fontSize = 20.sp)
+                    }
+                    Column {
+                        Text(
+                            text = recipient,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp,
+                            color = AccessibilityColors.Heading
+                        )
+                        Text(
+                            text = subLine,
+                            fontSize = 13.sp,
+                            color = AccessibilityColors.TextMuted
+                        )
+                    }
+                }
+
+                // Artifact zone: the final WhatsApp bubble exactly as it will be sent.
+                Surface(
+                    color = PromptChatBg,
+                    shape = RoundedCornerShape(24.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x0D000000)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Surface(
+                            color = PromptBubbleGreen,
+                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
+                            shadowElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 8.dp)) {
+                                if (editing) {
+                                    // EDIT MODE: inline editable text + saved-variant picker.
+                                    OutlinedTextField(
+                                        value = draft,
+                                        onValueChange = { draft = it },
+                                        minLines = 3,
+                                        maxLines = 10,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    Text(
+                                        text = resolvedMessage.ifBlank { " " },
+                                        color = AccessibilityColors.TextStrong,
+                                        fontSize = 15.sp,
+                                        lineHeight = 22.sp
+                                    )
+                                    if (signature.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = signature,
+                                            color = AccessibilityColors.TextStrong,
+                                            fontSize = 15.sp,
+                                            lineHeight = 22.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (showVCard) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        PromptVCardElement(name = cardName)
+                                    }
+                                }
+                                // Meta: timestamp + static double-check.
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(metaTime, fontSize = 10.sp, color = AccessibilityColors.TextMuted)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("✓✓", fontSize = 10.sp, color = PromptCheckBlue)
+                                }
+                            }
+                        }
+
+                        if (editing && roleTemplates.size > 1) {
+                            // Saved-variant picker for THIS moment: pick one to swap the text.
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "בחירת נוסח שמור",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccessibilityColors.TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                roleTemplates.forEach { variant ->
+                                    val body = MessageComposition.build(variant)
+                                    val selected = body == draft
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (selected) AccessibilityColors.GreenSurface else AccessibilityColors.Surface,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.5.dp,
+                                            if (selected) AccessibilityColors.GreenCheck else AccessibilityColors.CardBorder
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { draft = body }
+                                    ) {
+                                        Text(
+                                            text = variant.title.ifBlank { TemplateCardSummary.bodyPreview(body) },
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = AccessibilityColors.TextStrong,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Discreet edit link — nothing editable is visible until it is tapped.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = if (editing) "ביטול עריכה" else "ערוך הודעה",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccessibilityColors.TextMuted,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                modifier = Modifier
+                                    .clickable {
+                                        if (editing) {
+                                            // Collapse back to the static artifact, discarding the ad-hoc edit.
+                                            draft = activeBody
+                                            editing = false
+                                        } else {
+                                            editing = true
+                                        }
+                                    }
+                                    .padding(4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Exactly two choices: send or not now.
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        color = AccessibilityColors.Surface,
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD1D7DB)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onDone() }
+                    ) {
+                        Text(
+                            text = "לא עכשיו",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = AccessibilityColors.TextMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp)
+                        )
+                    }
+                    Surface(
+                        color = AccessibilityColors.Primary,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { send() }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(AccessibilityIcons.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("שלח", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                }
+
+                status?.let {
+                    Text(it, color = AccessibilityColors.Danger, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
 }
+
+/** The static vCard element drawn inside the artifact bubble (ended moment, card enabled). */
+@Composable
+private fun PromptVCardElement(name: String) {
+    val initials = name.trim().split(" ").filter { it.isNotBlank() }.take(2)
+        .joinToString("") { it.take(1) }.ifBlank { "דל" }
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE9EDEF)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(PromptVCardAvatar),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+            Column {
+                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccessibilityColors.TextStrong, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("איש קשר (.vcf)", fontSize = 12.sp, color = AccessibilityColors.TextMuted)
+            }
+        }
+    }
+}
+
 
 // ===================== SCREEN 5 — ACTIVITY =====================
 @Composable

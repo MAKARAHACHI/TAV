@@ -140,7 +140,7 @@ class CallDetectionService : Service() {
         val settings = MissedCallAutoResponseSettings(context)
         // Which after-call moment is this? An outgoing call with zero duration never connected.
         when (EndedMomentClassifier.classify(latestCall.type, latestCall.durationSeconds)) {
-            EndedMoment.NO_ANSWER_OUTGOING -> offerNoAnswer(context, phone, now, suggestionStore, settings)
+            EndedMoment.NO_ANSWER_OUTGOING -> offerNoAnswer(context, phone, now, latestCall, suggestionStore, settings)
             EndedMoment.ENDED -> offerEnded(context, phone, now, latestCall, suggestionStore, settings)
         }
     }
@@ -167,7 +167,9 @@ class CallDetectionService : Service() {
             phone = phone,
             displayName = displayName,
             message = message,
-            wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L
+            wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L,
+            // Real call time drives the approval sheet's "לפני {X}" sub-line when the body is tapped.
+            callTimestampMillis = latestCall.timestampMillis
         )
         suggestionStore.markSuggested(phone, now)
     }
@@ -181,6 +183,7 @@ class CallDetectionService : Service() {
         context: Context,
         phone: String,
         now: Long,
+        latestCall: LatestCallLogEntry,
         suggestionStore: EndedSuggestionStore,
         settings: MissedCallAutoResponseSettings
     ) {
@@ -194,6 +197,8 @@ class CallDetectionService : Service() {
             phone = phone,
             leadName = displayName,
             templateId = settings.selectedNoAnswerTemplateId,
+            // Real call time drives the approval sheet's "לפני {X}" sub-line.
+            callTimestampMillis = latestCall.timestampMillis,
             callType = FollowUpPromptModeLogic.CALL_TYPE_NO_ANSWER
         )
         suggestionStore.markSuggested(phone, now)

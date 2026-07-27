@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.followupnadlan.MainActivity
 import com.followupnadlan.R
 import com.followupnadlan.postcall.EndedSendReceiver
 
@@ -29,7 +30,13 @@ class EndedSuggestionNotificationHelper(private val context: Context) {
      * connected would describe a conversation that did not happen, and the user decides whether to
      * send by reading this line.
      */
-    fun showSuggestion(phone: String, displayName: String, message: String, wasAnswered: Boolean = true) {
+    fun showSuggestion(
+        phone: String,
+        displayName: String,
+        message: String,
+        wasAnswered: Boolean = true,
+        callTimestampMillis: Long = 0L
+    ) {
         if (phone.isBlank() || message.isBlank()) return
         createChannel()
 
@@ -42,7 +49,9 @@ class EndedSuggestionNotificationHelper(private val context: Context) {
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
-            .setContentIntent(sendIntent(phone, message))
+            // Tapping the body opens the pure approval sheet (manual approve); the quick "שלח"
+            // action button keeps the existing one-tap background send.
+            .setContentIntent(openSheetIntent(phone, displayName, message, callTimestampMillis))
             .addAction(0, "שלח", sendIntent(phone, message))
             .addAction(0, "שמור איש קשר", saveContactIntent(phone))
             .setAutoCancel(true)
@@ -55,6 +64,37 @@ class EndedSuggestionNotificationHelper(private val context: Context) {
     }
 
     fun cancel() = notificationManager.cancel(NOTIFICATION_ID)
+
+    /**
+     * Tapping the notification body opens the pure approval bottom-sheet (ENDED moment) in the app,
+     * pre-filled with the exact prepared message, so the user reads the artifact and decides —
+     * manual approve, matching the missed / no-answer moments. Routes through the same
+     * ACTION_OPEN_FOLLOW_UP intent MainActivity already parses.
+     */
+    private fun openSheetIntent(
+        phone: String,
+        displayName: String,
+        message: String,
+        callTimestampMillis: Long
+    ): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = FollowUpNotificationHelper.ACTION_OPEN_FOLLOW_UP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(FollowUpNotificationHelper.EXTRA_PHONE, phone)
+            putExtra(FollowUpNotificationHelper.EXTRA_MESSAGE, message)
+            putExtra(FollowUpNotificationHelper.EXTRA_LEAD_NAME, displayName)
+            if (callTimestampMillis > 0L) {
+                putExtra(FollowUpNotificationHelper.EXTRA_CALL_TIMESTAMP_MILLIS, callTimestampMillis)
+            }
+            // No callType extra ⇒ FollowUpPromptModeLogic.fromCallType maps to CALL_ENDED.
+        }
+        return PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_OPEN_SHEET,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 
     /** "שלח" — hands off to the background sender; the user never leaves what they were doing. */
     private fun sendIntent(phone: String, message: String): PendingIntent {
@@ -111,6 +151,7 @@ class EndedSuggestionNotificationHelper(private val context: Context) {
         const val NOTIFICATION_ID = 8201
         private const val REQUEST_CODE_SEND = 8201
         private const val REQUEST_CODE_SAVE_CONTACT = 8202
+        private const val REQUEST_CODE_OPEN_SHEET = 8203
         private const val CHANNEL_NAME = "הצעת המשך אחרי שיחה"
         private const val CHANNEL_DESCRIPTION = "הצעה שקטה לשלוח הודעת המשך אחרי שיחה"
     }

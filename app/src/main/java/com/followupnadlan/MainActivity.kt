@@ -103,7 +103,9 @@ class MainActivity : ComponentActivity() {
             phone = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_PHONE).orEmpty(),
             message = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_MESSAGE).orEmpty(),
             fromNotification = true,
-            callType = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_CALL_TYPE)
+            callType = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_CALL_TYPE),
+            callTimestampMs = intent.getLongExtra(FollowUpNotificationHelper.EXTRA_CALL_TIMESTAMP_MILLIS, 0L),
+            leadName = intent.getStringExtra(FollowUpNotificationHelper.EXTRA_LEAD_NAME).orEmpty()
         )
     }
 }

@@ -54,6 +54,14 @@ object AccessibilityIcons {
         }
     }
 
+    // Paper-plane "send" — matches the send-icon in quick-send-pure.html's [שלח] button.
+    val Send: ImageVector = icon("send") {
+        solid {
+            moveTo(2f, 21f); lineTo(23f, 12f); lineTo(2f, 3f)
+            verticalLineTo(10f); lineTo(17f, 12f); lineTo(2f, 14f); close()
+        }
+    }
+
     val Shield: ImageVector = icon("shield") {
         solid {
             moveTo(12f, 2f); lineTo(20f, 5f); verticalLineTo(11f)
