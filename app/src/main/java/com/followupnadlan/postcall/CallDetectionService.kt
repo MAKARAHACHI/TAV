@@ -22,6 +22,9 @@ import com.followupnadlan.R
 import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.EndedScopeSettings
 import com.followupnadlan.accessibility.FollowUpCooldownSettings
+import com.followupnadlan.accessibility.LocalMomentResolver
+import com.followupnadlan.accessibility.WorkingHoursDecider
+import com.followupnadlan.accessibility.WorkingHoursSettings
 import com.followupnadlan.missedcall.ContactVerifier
 import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
 import com.followupnadlan.notifications.EndedSuggestionNotificationHelper
@@ -120,7 +123,11 @@ class CallDetectionService : Service() {
                 lastAnyNotificationAtEpochMs = suggestionStore.lastAnyNotificationAt(),
                 sameNumberCooldownMillis = cooldowns.sameNumberCooldownMillis,
                 globalQuietMillis = cooldowns.globalQuietMillis,
-                nowEpochMs = now
+                nowEpochMs = now,
+                withinWorkingHours = WorkingHoursDecider.isWithinWorkingHours(
+                    LocalMomentResolver.resolve(now),
+                    WorkingHoursSettings(context).snapshot()
+                )
             )
         )
         if (decision != EndedSuggestionDecision.SUGGEST) return

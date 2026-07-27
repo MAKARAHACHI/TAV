@@ -10,8 +10,11 @@ import com.followupnadlan.followuplog.FollowUpLogStore
 import com.followupnadlan.accessibility.ExclusionsStore
 import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.BlockedRecipientGroup
+import com.followupnadlan.accessibility.LocalMomentResolver
 import com.followupnadlan.accessibility.RecipientScope
 import com.followupnadlan.accessibility.RecipientScopeSettings
+import com.followupnadlan.accessibility.WorkingHoursDecider
+import com.followupnadlan.accessibility.WorkingHoursSettings
 import com.followupnadlan.notifications.FollowUpFailureNotificationHelper
 import com.followupnadlan.notifications.MissedCallManualReplyNotificationHelper
 import com.followupnadlan.postcall.CallLogReader
@@ -44,6 +47,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val exclusionsStore = ExclusionsStore(context)
     private val allowedRecipientsStore = AllowedRecipientsStore(context)
     private val contactVerifier = ContactVerifier(context)
+    private val workingHoursSettings = WorkingHoursSettings(context)
 
     fun handleMissedIncomingCandidate(): MissedCallAutoResponseAction {
         val latestCall = CallLogReader(context).readLatestCall()
@@ -261,6 +265,14 @@ class MissedCallAutoResponseHandler(private val context: Context) {
                     message,
                     candidate.source
                 )
+            MissedCallAutoResponseAction.SKIP_OUTSIDE_WORKING_HOURS ->
+                appendLog(
+                    FollowUpActionType.AUTO_SMS_SKIPPED_OUTSIDE_WORKING_HOURS,
+                    now,
+                    normalizedPhone.orEmpty(),
+                    message,
+                    candidate.source
+                )
             MissedCallAutoResponseAction.SKIP_NOT_MISSED_CALL -> Unit
             MissedCallAutoResponseAction.SKIP_NO_TEMPLATE ->
                 appendLog(FollowUpActionType.AUTO_SMS_FAILED, now, normalizedPhone.orEmpty(), "", candidate.source)
@@ -441,7 +453,11 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         blockFirstTimeNumbers = exclusionsStore.loadBlockedGroups().contains(BlockedRecipientGroup.FIRST_TIME),
         isFirstTimeNumber = FollowUpNumberHistory.isFirstTimeNumber(logStore.load(), normalizedPhone ?: phone),
         contactsPermissionGranted = contactVerifier.hasContactsPermission(),
-        isSavedContact = contactVerifier.isSavedContact(normalizedPhone ?: phone)
+        isSavedContact = contactVerifier.isSavedContact(normalizedPhone ?: phone),
+        withinWorkingHours = WorkingHoursDecider.isWithinWorkingHours(
+            LocalMomentResolver.resolve(now),
+            workingHoursSettings.snapshot()
+        )
     )
 
     /**

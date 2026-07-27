@@ -37,7 +37,8 @@ data class MissedCallAutoResponseInput(
     val blockFirstTimeNumbers: Boolean = false,
     val isFirstTimeNumber: Boolean = false,
     val contactsPermissionGranted: Boolean = true,
-    val isSavedContact: Boolean = false
+    val isSavedContact: Boolean = false,
+    val withinWorkingHours: Boolean = true
 )
 
 enum class MissedCallRecipientMode {
@@ -76,6 +77,7 @@ enum class MissedCallAutoResponseAction {
     SKIP_CONTACT_TYPE_UNVERIFIED,
     SKIP_CONTACTS_ONLY_UNVERIFIED,
     SKIP_NOT_ALLOWED,
+    SKIP_OUTSIDE_WORKING_HOURS,
     OPEN_MANUAL_FALLBACK
 }
 
@@ -100,6 +102,9 @@ object MissedCallAutoResponseDecision {
         }
         if (input.excluded) {
             return MissedCallAutoResponseAction.SKIP_EXCLUDED
+        }
+        if (!input.withinWorkingHours) {
+            return MissedCallAutoResponseAction.SKIP_OUTSIDE_WORKING_HOURS
         }
         val recipientMode = effectiveRecipientMode(input)
         val contactTypeNeeded = input.blockSavedContacts ||

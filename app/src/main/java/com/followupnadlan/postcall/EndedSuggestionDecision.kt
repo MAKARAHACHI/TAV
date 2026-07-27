@@ -47,7 +47,8 @@ data class EndedSuggestionInput(
     val sameNumberCooldownMillis: Long? = FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS,
     /** Global anti-burst window; `null` when the user switched it off. */
     val globalQuietMillis: Long? = FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS,
-    val nowEpochMs: Long
+    val nowEpochMs: Long,
+    val withinWorkingHours: Boolean = true
 )
 
 enum class EndedSuggestionDecision {
@@ -56,7 +57,8 @@ enum class EndedSuggestionDecision {
     SKIP_OUT_OF_SCOPE,
     SKIP_CONTACT_TYPE_UNVERIFIED,
     SKIP_COOLDOWN,
-    SKIP_QUIET_WINDOW
+    SKIP_QUIET_WINDOW,
+    SKIP_OUTSIDE_WORKING_HOURS
 }
 
 object EndedSuggestionDecider {
@@ -80,6 +82,8 @@ object EndedSuggestionDecider {
                 AllowedRecipientDecisionMatcher.isAllowed(input.allowedNumbers, phone)
         }
         if (!inScope) return EndedSuggestionDecision.SKIP_OUT_OF_SCOPE
+
+        if (!input.withinWorkingHours) return EndedSuggestionDecision.SKIP_OUTSIDE_WORKING_HOURS
 
         // Don't ask about the same person twice in a row.
         if (withinWindow(input.lastSuggestedAtEpochMs, input.nowEpochMs, input.sameNumberCooldownMillis)) {

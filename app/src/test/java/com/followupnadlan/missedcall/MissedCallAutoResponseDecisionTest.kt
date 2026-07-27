@@ -578,7 +578,8 @@ class MissedCallAutoResponseDecisionTest {
         blockFirstTimeNumbers: Boolean = false,
         isFirstTimeNumber: Boolean = false,
         contactsPermissionGranted: Boolean = true,
-        isSavedContact: Boolean = false
+        isSavedContact: Boolean = false,
+        withinWorkingHours: Boolean = true
     ): MissedCallAutoResponseInput = MissedCallAutoResponseInput(
         direction = direction,
         wasAnswered = wasAnswered,
@@ -605,6 +606,16 @@ class MissedCallAutoResponseDecisionTest {
         blockFirstTimeNumbers = blockFirstTimeNumbers,
         isFirstTimeNumber = isFirstTimeNumber,
         contactsPermissionGranted = contactsPermissionGranted,
-        isSavedContact = isSavedContact
+        isSavedContact = isSavedContact,
+        withinWorkingHours = withinWorkingHours
     )
+
+    @Test
+    fun outsideWorkingHoursSkipsBeforeChannelRouting() {
+        val action = MissedCallAutoResponseDecision.decide(
+            defaultInput(withinWorkingHours = false)
+        )
+
+        assertEquals(MissedCallAutoResponseAction.SKIP_OUTSIDE_WORKING_HOURS, action)
+    }
 }

@@ -110,6 +110,9 @@ object ActivityFeed {
         FollowUpActionType.AUTO_SMS_SKIPPED_NOT_ALLOWED ->
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — המספר לא נמצא ברשימת המותרים")
 
+        FollowUpActionType.AUTO_SMS_SKIPPED_OUTSIDE_WORKING_HOURS ->
+            Triple(AccessibilityIcons.Schedule, AccessibilityColors.TextFaint, "לא נשלח — מחוץ לשעות הפעילות שהגדרת")
+
         FollowUpActionType.AUTO_SMS_SKIPPED_NO_NUMBER ->
             Triple(AccessibilityIcons.Block, AccessibilityColors.TextFaint, "לא נשלח — לא זוהה מספר תקין")
 

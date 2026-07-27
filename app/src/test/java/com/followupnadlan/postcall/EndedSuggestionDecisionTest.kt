@@ -18,7 +18,8 @@ class EndedSuggestionDecisionTest {
         lastSuggestedAtEpochMs: Long? = null,
         lastAnyNotificationAtEpochMs: Long? = null,
         sameNumberCooldownMillis: Long? = FollowUpConstants.SAME_NUMBER_COOLDOWN_MILLIS,
-        globalQuietMillis: Long? = FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS
+        globalQuietMillis: Long? = FollowUpConstants.GLOBAL_NOTIFICATION_QUIET_MILLIS,
+        withinWorkingHours: Boolean = true
     ) = EndedSuggestionInput(
         callDurationSeconds = callDurationSeconds,
         phoneNumber = phoneNumber,
@@ -30,8 +31,17 @@ class EndedSuggestionDecisionTest {
         lastAnyNotificationAtEpochMs = lastAnyNotificationAtEpochMs,
         sameNumberCooldownMillis = sameNumberCooldownMillis,
         globalQuietMillis = globalQuietMillis,
-        nowEpochMs = now
+        nowEpochMs = now,
+        withinWorkingHours = withinWorkingHours
     )
+
+    @Test
+    fun skipsOutsideWorkingHours() {
+        assertEquals(
+            EndedSuggestionDecision.SKIP_OUTSIDE_WORKING_HOURS,
+            EndedSuggestionDecider.decide(input(withinWorkingHours = false))
+        )
+    }
 
     @Test
     fun suggestsAfterARealConversationWithAnUnsavedNumber() {

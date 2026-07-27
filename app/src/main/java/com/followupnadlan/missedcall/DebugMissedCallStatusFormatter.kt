@@ -41,5 +41,7 @@ object DebugMissedCallStatusFormatter {
                 "אירוע הבדיקה נשלח, אבל במצב אנשי קשר בלבד לא ניתן לוודא שהמספר שמור, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
             MissedCallAutoResponseAction.SKIP_NOT_ALLOWED ->
                 "אירוע הבדיקה נשלח, אבל המספר לא נמצא ברשימת המותרים ולכן לא ייפתח WhatsApp ולא יישלח SMS."
+            MissedCallAutoResponseAction.SKIP_OUTSIDE_WORKING_HOURS ->
+                "אירוע הבדיקה נשלח, אבל עכשיו מחוץ לשעות הפעילות שהוגדרו, ולכן לא ייפתח WhatsApp ולא יישלח SMS."
         }
 }

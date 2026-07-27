@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -100,6 +101,7 @@ internal enum class AccessibilityModal {
     SETUP,
     TEMPLATES,
     EXCLUSIONS,
+    SMART_RULES,
     ALLOWED_RECIPIENTS,
     CONTACT_CARD,
     MISSED_CALL_PROMPT,
@@ -181,6 +183,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     val endedCardSettings = remember(context) { EndedCardSettings(appContext) }
     val cooldownSettings = remember(context) { FollowUpCooldownSettings(appContext) }
     val exclusionsStore = remember(context) { ExclusionsStore(appContext) }
+    val workingHoursSettings = remember(context) { WorkingHoursSettings(appContext) }
     val allowedRecipientsStore = remember(context) { AllowedRecipientsStore(appContext) }
     val myDetailsStore = remember(context) { MyDetailsStore(appContext) }
     val whatsAppAutoSendController = remember(context) { WhatsAppAutoSendController(appContext) }
@@ -602,9 +605,20 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 )
                             )
                         },
-                        onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
+                        onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
                         onDeleteHistory = { logStore.clear() },
                         onBack = { modal = AccessibilityModal.NONE }
+                    )
+
+                    AccessibilityModal.SMART_RULES -> SmartRulesScreen(
+                        workingHoursSettings = workingHoursSettings,
+                        exclusionsStore = exclusionsStore,
+                        recipientScope = recipientScope,
+                        exclusionsPreview = remember(recipientsRefresh) {
+                            RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label })
+                        },
+                        onOpenExclusions = { modal = AccessibilityModal.EXCLUSIONS },
+                        onBack = { modal = AccessibilityModal.NONE; recipientsRefresh++ }
                     )
 
                     AccessibilityModal.MISSED_CALL_PROMPT -> MissedCallPromptScreen(
@@ -2781,7 +2795,7 @@ private fun SystemSettingsScreen(
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot,
     cooldownSettings: FollowUpCooldownSettings,
     onRequestPermissions: () -> Unit,
-    onOpenExclusions: () -> Unit,
+    onOpenSmartRules: () -> Unit,
     onDeleteHistory: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -2857,17 +2871,17 @@ private fun SystemSettingsScreen(
             }
         }
 
-        // Who never gets a message, regardless of the journey's scope.
+        // Working hours + who never gets a message — gathered on one screen.
         AppCard(modifier = Modifier.fillMaxWidth()) {
             NavigationRowContent(
                 label = if (exclusionsPreview.count == 0) {
-                    "למי לא לשלוח?"
+                    "הגדרות חכמות"
                 } else {
-                    "למי לא לשלוח? · ${exclusionsPreview.count}"
+                    "הגדרות חכמות · ${exclusionsPreview.count} חסומים"
                 },
                 leadingIcon = AccessibilityIcons.Block,
                 leadingTint = AccessibilityColors.Primary,
-                onClick = onOpenExclusions
+                onClick = onOpenSmartRules
             )
         }
 
@@ -3599,6 +3613,248 @@ private fun ExclusionsScreen(
         }
     }
 }
+
+// One-letter Hebrew day initials, Sunday-first — matches the HTML reference's day-circle picker.
+private fun weekdayInitial(dayOfWeek: Int): String = when (dayOfWeek) {
+    java.util.Calendar.SUNDAY -> "א'"
+    java.util.Calendar.MONDAY -> "ב'"
+    java.util.Calendar.TUESDAY -> "ג'"
+    java.util.Calendar.WEDNESDAY -> "ד'"
+    java.util.Calendar.THURSDAY -> "ה'"
+    java.util.Calendar.FRIDAY -> "ו'"
+    else -> "ש'"
+}
+
+private fun formatMinuteOfDay(minuteOfDay: Int): String {
+    val hour = minuteOfDay / 60
+    val minute = minuteOfDay % 60
+    return "%02d:%02d".format(hour, minute)
+}
+
+/** A single day-of-week toggle circle in the working-hours picker. */
+@Composable
+private fun DayCircle(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(if (active) AccessibilityColors.Primary else AccessibilityColors.FieldGrey)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            color = if (active) Color.White else AccessibilityColors.TextMuted
+        )
+    }
+}
+
+/**
+ * "הגדרות חכמות" — the working-hours brake plus the existing recipient rules (blocked groups,
+ * blacklist) gathered on one screen, as in the design reference. Blocked-groups and blacklist
+ * still read/write [ExclusionsStore]; only the layout is new here.
+ */
+@Composable
+private fun SmartRulesScreen(
+    workingHoursSettings: WorkingHoursSettings,
+    exclusionsStore: ExclusionsStore,
+    recipientScope: RecipientScope,
+    exclusionsPreview: RecipientPreview,
+    onOpenExclusions: () -> Unit,
+    onBack: () -> Unit
+) {
+    var enabled by remember { mutableStateOf(workingHoursSettings.enabled) }
+    var activeDays by remember { mutableStateOf(workingHoursSettings.activeDays) }
+    var startMinute by remember { mutableStateOf(workingHoursSettings.startMinuteOfDay) }
+    var endMinute by remember { mutableStateOf(workingHoursSettings.endMinuteOfDay) }
+    var blockedGroups by remember { mutableStateOf(exclusionsStore.loadBlockedGroups()) }
+
+    val context = LocalContext.current
+
+    fun openTimePicker(current: Int, onPicked: (Int) -> Unit) {
+        android.app.TimePickerDialog(
+            context,
+            { _, hour, minute -> onPicked(hour * 60 + minute) },
+            current / 60,
+            current % 60,
+            true
+        ).show()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ModalHeader(title = "הגדרות חכמות", onBack = onBack)
+
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(AccessibilityIcons.Schedule, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(20.dp))
+                        Text("שעות פעילות", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.Heading)
+                    }
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = {
+                            enabled = it
+                            workingHoursSettings.enabled = it
+                        }
+                    )
+                }
+                Text(
+                    if (enabled) {
+                        "המערכת תשלח הודעות רק בשעות ובימים שנבחרו למטה. מחוץ לשעות אלו, האפליקציה תנוח."
+                    } else {
+                        "המערכת פעילה בכל שעה וכל יום."
+                    },
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = AccessibilityColors.TextMuted
+                )
+
+                if (enabled) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        listOf(
+                            java.util.Calendar.SUNDAY, java.util.Calendar.MONDAY, java.util.Calendar.TUESDAY,
+                            java.util.Calendar.WEDNESDAY, java.util.Calendar.THURSDAY, java.util.Calendar.FRIDAY,
+                            java.util.Calendar.SATURDAY
+                        ).forEach { day ->
+                            DayCircle(
+                                label = weekdayInitial(day),
+                                active = activeDays.contains(day),
+                                onClick = {
+                                    val next = if (activeDays.contains(day)) activeDays - day else activeDays + day
+                                    activeDays = next
+                                    workingHoursSettings.activeDays = next
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(AccessibilityColors.FieldGrey)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            formatMinuteOfDay(startMinute),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = AccessibilityColors.TextStrong,
+                            modifier = Modifier.clickable {
+                                openTimePicker(startMinute) {
+                                    startMinute = it
+                                    workingHoursSettings.startMinuteOfDay = it
+                                }
+                            }
+                        )
+                        Text("עד", fontSize = 13.sp, color = AccessibilityColors.TextMuted)
+                        Text(
+                            formatMinuteOfDay(endMinute),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = AccessibilityColors.TextStrong,
+                            modifier = Modifier.clickable {
+                                openTimePicker(endMinute) {
+                                    endMinute = it
+                                    workingHoursSettings.endMinuteOfDay = it
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(AccessibilityIcons.Shield, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(20.dp))
+                    Text("למי לא לשלוח?", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.Heading)
+                }
+                Text(
+                    "הגדרות למניעת שליחה לאנשים שכבר מכירים אותך.",
+                    fontSize = 13.sp,
+                    color = AccessibilityColors.TextMuted,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+
+                val visibleGroups = RecipientRulesUi.visibleBlockGroups(recipientScope)
+                visibleGroups.forEach { group ->
+                    SmartRuleToggleRow(
+                        title = blockedGroupLabel(group),
+                        description = blockedGroupDescription(group),
+                        checked = blockedGroups.contains(group),
+                        onToggle = {
+                            val next = !blockedGroups.contains(group)
+                            exclusionsStore.setBlockedGroup(group, next)
+                            blockedGroups = exclusionsStore.loadBlockedGroups()
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, AccessibilityColors.CardBorder, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenExclusions)
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🚫 רשימה שחורה אישית", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
+                    Text(
+                        "${exclusionsPreview.count} מספרים",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AccessibilityColors.Danger
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A "rule row" with a title, description, and a real on/off switch — matching the design's exclusion rows. */
+@Composable
+private fun SmartRuleToggleRow(title: String, description: String, checked: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
+            Text(description, fontSize = 12.sp, lineHeight = 17.sp, color = AccessibilityColors.TextMuted)
+        }
+        Switch(checked = checked, onCheckedChange = { onToggle() })
+    }
+}
+
+private fun blockedGroupDescription(group: BlockedRecipientGroup): String =
+    when (group) {
+        BlockedRecipientGroup.CONTACTS -> "אל תשלח הודעות לאנשים ששמורים אצלי בטלפון."
+        BlockedRecipientGroup.NON_CONTACTS -> "אל תשלח הודעות למספרים שלא שמורים אצלי."
+        BlockedRecipientGroup.FIRST_TIME -> "אל תשלח בפעם הראשונה שמספר מתקשר — רק החל מהשנייה."
+    }
 
 @Composable
 private fun AllowedRecipientsScreen(
