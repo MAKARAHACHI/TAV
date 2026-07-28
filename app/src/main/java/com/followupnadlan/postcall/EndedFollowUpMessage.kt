@@ -5,8 +5,7 @@ import com.followupnadlan.accessibility.EndedCardSettings
 import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsStore
-import com.followupnadlan.templates.EndedMessageComposer
-import com.followupnadlan.templates.MessageComposition
+import com.followupnadlan.templates.MomentMessageComposer
 import com.followupnadlan.templates.TemplateRole
 import com.followupnadlan.templates.TemplateRoleSelector
 import com.followupnadlan.templates.TemplateStore
@@ -27,8 +26,8 @@ object EndedFollowUpMessage {
             selectedIdForRole = settings.selectedEndedTemplateId
         ) ?: return ""
 
-        return EndedMessageComposer.compose(
-            body = MessageComposition.build(template),
+        return MomentMessageComposer.compose(
+            template = template,
             card = ContactCard.fromProfile(MyDetailsStore(context).load()),
             attachCard = EndedCardSettings(context).cardAttached
         )

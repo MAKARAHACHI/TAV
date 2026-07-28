@@ -1,12 +1,11 @@
 package com.followupnadlan.postcall
 
 import android.content.Context
-import com.followupnadlan.accessibility.EndedCardSettings
+import com.followupnadlan.accessibility.NoAnswerCardSettings
 import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsStore
-import com.followupnadlan.templates.EndedMessageComposer
-import com.followupnadlan.templates.MessageComposition
+import com.followupnadlan.templates.MomentMessageComposer
 import com.followupnadlan.templates.TemplateRole
 import com.followupnadlan.templates.TemplateRoleSelector
 import com.followupnadlan.templates.TemplateStore
@@ -26,10 +25,11 @@ object NoAnswerFollowUpMessage {
             selectedIdForRole = settings.selectedNoAnswerTemplateId
         ) ?: return ""
 
-        return EndedMessageComposer.compose(
-            body = MessageComposition.build(template),
+        return MomentMessageComposer.compose(
+            template = template,
             card = ContactCard.fromProfile(MyDetailsStore(context).load()),
-            attachCard = EndedCardSettings(context).cardAttached
+            // The "לא ענו" moment's OWN card toggle (previously read the ended store by mistake).
+            attachCard = NoAnswerCardSettings(context).cardAttached
         )
     }
 

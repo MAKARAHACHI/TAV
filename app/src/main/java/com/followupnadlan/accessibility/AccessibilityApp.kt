@@ -76,11 +76,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.followupnadlan.followuplog.FollowUpLogStore
@@ -105,8 +109,10 @@ import com.followupnadlan.setup.PermissionSnapshot
 import com.followupnadlan.setup.PermissionStatusLogic
 import com.followupnadlan.sharing.ContactCardShareResult
 import com.followupnadlan.sharing.PrepareAndShareContactCard
+import com.followupnadlan.templates.ContactTextCard
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
+import com.followupnadlan.templates.WhatsAppTextStyling
 import com.followupnadlan.templates.TemplateRole
 import com.followupnadlan.templates.TemplateRoleSelector
 import com.followupnadlan.templates.TemplateStore
@@ -730,11 +736,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 profileEmpty = signaturePreview.isBlank()
                             )
                         )
-                        val cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
-                            card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
-                                .joinToString("") { it.take(1) }.ifBlank { "דל" }
-                        }
-                        val cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" }
+                        // The formatted TEXT business card, built once from the profile and shown in
+                        // whichever moments have their card toggle ON (and appended to their sends).
+                        val cardText = ContactTextCard.build(myDetailsStore.load())
                         // Greeting first name from the real profile; falls back to "דני" when empty.
                         val greetingName = ContactCard.fromProfile(myDetailsStore.load()).fullName
                             .trim().split(" ").firstOrNull { it.isNotBlank() } ?: "דני"
@@ -748,15 +752,16 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             missedEnabled = missedMomentEnabled,
                             endedEnabled = endedMomentEnabled,
                             noAnswerEnabled = noAnswerMomentEnabled,
-                            missedBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
-                            endedBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
-                            noAnswerBody = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            // When a moment's card is on it owns the website line, so the template's
+                            // own link lines are suppressed (raw body) to avoid showing it twice.
+                            missedBody = missedTemplate?.let { if (missedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
+                            endedBody = endedTemplate?.let { if (endedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
+                            noAnswerBody = noAnswerTemplate?.let { if (noAnswerCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             signature = signaturePreview,
                             missedCardAttached = missedCardAttached,
                             endedCardAttached = endedCardAttached,
                             noAnswerCardAttached = noAnswerCardAttached,
-                            cardInitials = cardInitials,
-                            cardLine1 = cardLine1,
+                            cardText = cardText,
                             // The missed card's send-mode chip. §2: "נשלח אוטומטי" only when the moment
                             // is AUTOMATIC AND the Accessibility service is actually enabled; else "ידני".
                             missedSendMode = MissedSendModeLabel.of(
@@ -968,7 +973,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             isEnabled = missedMomentEnabled,
                             signature = signaturePreview,
                             time = "10:42",
-                            activeBody = missedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            activeBody = missedTemplate?.let { if (missedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
@@ -978,6 +983,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             globalQuiet = globalQuiet,
                             scopeOverride = missedScopeOverride,
                             cardAttached = missedCardAttached,
+                            cardText = ContactTextCard.build(myDetailsStore.load()),
                             selectedPeoplePreview = selectedPeoplePreviewFor(missedScopeOverride),
                             variants = momentVariantsFor(TemplateRole.MISSED_CALL),
                             onToggleEnabled = {
@@ -1006,7 +1012,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             isEnabled = endedMomentEnabled,
                             signature = signaturePreview,
                             time = "11:05",
-                            activeBody = endedTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            activeBody = endedTemplate?.let { if (endedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
@@ -1016,6 +1022,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             globalQuiet = globalQuiet,
                             scopeOverride = endedScopeOverride,
                             cardAttached = endedCardAttached,
+                            cardText = ContactTextCard.build(myDetailsStore.load()),
                             selectedPeoplePreview = selectedPeoplePreviewFor(endedScopeOverride),
                             variants = momentVariantsFor(TemplateRole.CALL_ENDED),
                             onToggleEnabled = {
@@ -1044,7 +1051,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             isEnabled = noAnswerMomentEnabled,
                             signature = signaturePreview,
                             time = "12:30",
-                            activeBody = noAnswerTemplate?.let { MessageComposition.build(it) }.orEmpty(),
+                            activeBody = noAnswerTemplate?.let { if (noAnswerCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
@@ -1054,6 +1061,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             globalQuiet = globalQuiet,
                             scopeOverride = noAnswerScopeOverride,
                             cardAttached = noAnswerCardAttached,
+                            cardText = ContactTextCard.build(myDetailsStore.load()),
                             selectedPeoplePreview = selectedPeoplePreviewFor(noAnswerScopeOverride),
                             variants = momentVariantsFor(TemplateRole.NO_ANSWER_OUTGOING),
                             onToggleEnabled = {
@@ -1149,7 +1157,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         missedCardAttached = missedCardAttached,
                         endedCardAttached = endedCardAttached,
                         noAnswerCardAttached = noAnswerCardAttached,
-                        cardName = ContactCard.fromProfile(myDetailsStore.load()).fullName,
+                        card = ContactCard.fromProfile(myDetailsStore.load()),
                         onDone = { modal = AccessibilityModal.NONE }
                     )
                 }
@@ -1177,11 +1185,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             titleOverride = if (role == TemplateRole.NO_ANSWER_OUTGOING) "לא ענו" else null,
                             // The vCard/delay toggles belong to the ended moment only.
                             showCardToggle = role == TemplateRole.CALL_ENDED,
-                            cardInitials = ContactCard.fromProfile(myDetailsStore.load()).let { card ->
-                                card.fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
-                                    .joinToString("") { it.take(1) }.ifBlank { "דל" }
-                            },
-                            cardLine1 = ContactCard.fromProfile(myDetailsStore.load()).fullName.ifBlank { "השם שלך" },
+                            cardText = ContactTextCard.build(myDetailsStore.load()),
                             onToggleCardAttached = {
                                 endedCardAttached = !endedCardAttached
                                 endedCardSettings.cardAttached = endedCardAttached
@@ -1436,6 +1440,7 @@ private fun MomentEditScreen(
     globalQuiet: Long?,
     scopeOverride: RecipientScope?,
     cardAttached: Boolean,
+    cardText: String,
     selectedPeoplePreview: RecipientPreview?,
     variants: MomentVariants,
     onToggleEnabled: () -> Unit,
@@ -1520,6 +1525,12 @@ private fun MomentEditScreen(
                                 fontSize = 14.sp,
                                 lineHeight = 20.sp
                             )
+                        }
+                        // WYSIWYG: the formatted text card appears here live when this moment's card
+                        // toggle is ON, and disappears when it flips OFF — same formatter as send.
+                        if (cardAttached && cardText.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            ContactTextCardBubble(raw = cardText)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1945,8 +1956,7 @@ private fun HomeScreen(
     missedCardAttached: Boolean,
     endedCardAttached: Boolean,
     noAnswerCardAttached: Boolean,
-    cardInitials: String,
-    cardLine1: String,
+    cardText: String,
     missedSendMode: String,
     onToggleMaster: () -> Unit,
     onToggleMissed: () -> Unit,
@@ -2045,7 +2055,7 @@ private fun HomeScreen(
             enabled = missedEnabled,
             active = missedActive,
             open = openCards.contains(0),
-            card = if (missedCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            card = if (missedCardAttached) HomeCardPreview(text = cardText) else null,
             onHeaderClick = { toggleOpen(0) },
             onToggle = onToggleMissed,
             onEdit = onOpenMissedJourney
@@ -2062,7 +2072,7 @@ private fun HomeScreen(
             enabled = endedEnabled,
             active = endedActive,
             open = openCards.contains(1),
-            card = if (endedCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            card = if (endedCardAttached) HomeCardPreview(text = cardText) else null,
             onHeaderClick = { toggleOpen(1) },
             onToggle = onToggleEnded,
             onEdit = onOpenEndedJourney
@@ -2079,7 +2089,7 @@ private fun HomeScreen(
             enabled = noAnswerEnabled,
             active = noAnswerActive,
             open = openCards.contains(2),
-            card = if (noAnswerCardAttached) HomeCardPreview(initials = cardInitials, line1 = cardLine1) else null,
+            card = if (noAnswerCardAttached) HomeCardPreview(text = cardText) else null,
             onHeaderClick = { toggleOpen(2) },
             onToggle = onToggleNoAnswer,
             onEdit = onOpenNoAnswerJourney
@@ -2127,7 +2137,55 @@ private fun HomeMasterCard(checked: Boolean, onToggle: () -> Unit) {
     }
 }
 
-private data class HomeCardPreview(val initials: String, val line1: String)
+/** The formatted text card for a Home accordion bubble — the exact string that is also sent. */
+private data class HomeCardPreview(val text: String)
+
+/** WhatsApp link blue and the grey hint colour, straight from app-text-vcard.html. */
+private val WaLinkBlue = Color(0xFF027EB5)
+private val WaHintGrey = Color(0xFF54656F)
+
+/**
+ * Renders the formatted TEXT business card ([raw] = the exact string that is also sent) with
+ * WhatsApp-style formatting applied from that single source string (§2): `*bold*` → bold, bare
+ * URLs/phones → link blue + underline, `_italic_` hint line → smaller, grey, italic. Line breaks
+ * are preserved (the raw text carries them). Never maintains a second string.
+ */
+@Composable
+internal fun ContactTextCardBubble(raw: String) {
+    val hintRaw = "_${ContactTextCard.SAVE_HINT}_"
+    // Split the card into its lines so the grey hint line can be drawn smaller/grey while the rest
+    // keeps the body size; within each line the inline styles are applied from the same source.
+    val lines = raw.split("\n")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        lines.forEach { line ->
+            if (line.isBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                return@forEach
+            }
+            val isHint = line.trim() == hintRaw
+            val annotated = buildAnnotatedString {
+                WhatsAppTextStyling.spans(line).forEach { span ->
+                    when (span.style) {
+                        WhatsAppTextStyling.SpanStyle.BOLD ->
+                            withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.ExtraBold)) { append(span.text) }
+                        WhatsAppTextStyling.SpanStyle.ITALIC ->
+                            withStyle(androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic, color = WaHintGrey)) { append(span.text) }
+                        WhatsAppTextStyling.SpanStyle.LINK ->
+                            withStyle(androidx.compose.ui.text.SpanStyle(color = WaLinkBlue, textDecoration = TextDecoration.Underline)) { append(span.text) }
+                        WhatsAppTextStyling.SpanStyle.PLAIN ->
+                            append(span.text)
+                    }
+                }
+            }
+            Text(
+                text = annotated,
+                color = if (isHint) WaHintGrey else Color(0xFF111B21),
+                fontSize = if (isHint) 12.sp else 14.sp,
+                lineHeight = if (isHint) 16.sp else 20.sp
+            )
+        }
+    }
+}
 
 /**
  * The small send-mode pill on an accordion header: "נשלח אוטומטי" (teal) or "ידני" (muted). The
@@ -2333,34 +2391,12 @@ private fun HomeAccordionCard(
                                 )
                             }
 
-                            // vCard element inside the ended bubble (HOME.html .vcard). Static /
-                            // not-wired: WhatsApp blocks file-share to an unsaved number's chat.
-                            card?.let {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(colors.surface)
-                                        .border(1.dp, Color(0xFFE9EDEF), RoundedCornerShape(10.dp))
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF128C7E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(it.initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(it.line1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = colors.textStrong)
-                                        Text("איש קשר (.vcf)", fontSize = 12.sp, color = colors.textMuted)
-                                    }
-                                }
+                            // Formatted TEXT business card inside the bubble — shown only when this
+                            // moment's card toggle is ON. It is the exact text that is also sent
+                            // (§2), rendered with WhatsApp *bold* / link / italic styling.
+                            card?.takeIf { it.text.isNotBlank() }?.let {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                ContactTextCardBubble(raw = it.text)
                             }
 
                             Spacer(modifier = Modifier.height(6.dp))
@@ -2850,7 +2886,6 @@ private val PromptSheetBg = Color(0xFFF4F7F6)
 private val PromptChatBg = Color(0xFFEFEAE2)
 private val PromptBubbleGreen = Color(0xFFD9FDD3)
 private val PromptCheckBlue = Color(0xFF53BDEB)
-private val PromptVCardAvatar = Color(0xFF128C7E)
 
 @Composable
 private fun MissedCallPromptScreen(
@@ -2868,7 +2903,7 @@ private fun MissedCallPromptScreen(
     missedCardAttached: Boolean,
     endedCardAttached: Boolean,
     noAnswerCardAttached: Boolean,
-    cardName: String,
+    card: ContactCard,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2885,9 +2920,30 @@ private fun MissedCallPromptScreen(
         TemplateRole.CALL_ENDED -> selectedEndedId
     }
     val defaultTemplate = TemplateRoleSelector.forRole(templates, role, selectedIdForRole)
+    // The formatted TEXT business card is drawn in the bubble — and appended to the sent text —
+    // only when the shown moment's own card flag is on (per-moment, all three moments).
+    val cardAttached = when (mode) {
+        FollowUpPromptMode.MISSED_CALL -> missedCardAttached
+        FollowUpPromptMode.NO_ANSWER_OUTGOING -> noAnswerCardAttached
+        FollowUpPromptMode.CALL_ENDED -> endedCardAttached
+    }
+    // Built once from the profile; the SAME string is both previewed (styled) and sent (plain),
+    // so preview == sent (§2). Empty when the profile has no name — then no card anywhere.
+    val cardText = ContactTextCard.build(card)
+    val showCard = cardAttached && cardText.isNotBlank()
     // The active variant body drives the artifact. The message passed from the notification wins
-    // when present (it is the exact text that was prepared); otherwise fall back to the active variant.
-    val activeBody = message.ifBlank { defaultTemplate?.let { MessageComposition.build(it) }.orEmpty() }
+    // when present (it is the exact text that was prepared); otherwise fall back to the active
+    // variant. When the card is on it OWNS the website line, so the template's own link lines are
+    // suppressed (raw body) to avoid showing the website twice.
+    val fallbackBody = defaultTemplate?.let {
+        if (showCard) it.body.trim() else MessageComposition.build(it)
+    }.orEmpty()
+    // Normalise the incoming message to the PURE body: any text card and any one-line signature
+    // already baked in are stripped here, so the sheet is the single owner that re-appends them
+    // (signature drawn separately, card drawn styled) and the preview equals the sent text exactly,
+    // for every moment — never doubling the signature or the card (§2).
+    val incomingBody = message.ifBlank { fallbackBody }
+    val activeBody = SignatureLine.removeFrom(ContactTextCard.removeFrom(incomingBody, card), card)
 
     // A one-off edit / variant pick for THIS send only; never saved to the store.
     var editing by remember { mutableStateOf(false) }
@@ -2904,22 +2960,20 @@ private fun MissedCallPromptScreen(
         val rel = if (callTimestampMs > 0L) RelativeTimeHebrew.of(callTimestampMs, System.currentTimeMillis()) else "עכשיו"
         "${chrome.subLinePrefix} $rel"
     }
-    // The static vCard element is drawn in the bubble whenever the shown moment's own card flag is
-    // on (per-moment, all three moments — no longer ended-only). Drawn element only, no real .vcf.
-    val cardAttached = when (mode) {
-        FollowUpPromptMode.MISSED_CALL -> missedCardAttached
-        FollowUpPromptMode.NO_ANSWER_OUTGOING -> noAnswerCardAttached
-        FollowUpPromptMode.CALL_ENDED -> endedCardAttached
-    }
-    val showVCard = cardAttached && cardName.isNotBlank()
     val metaTime = remember(callTimestampMs) {
         val ms = if (callTimestampMs > 0L) callTimestampMs else System.currentTimeMillis()
         java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }
 
+    // The exact text that goes out, built from the SAME pieces the bubble previews (§2): the
+    // edited/approved body, closed by the one-line signature, then the formatted text card when
+    // this moment's card is attached. Preview == sent for every moment.
+    val outgoingMessage = SignatureLine.append(resolvedMessage, card)
+        .let { if (showCard) ContactTextCard.append(it, card) else it }
+
     fun send() {
-        val error = FollowUpPromptSender.send(context, mode, phone, resolvedMessage, preferredWhatsAppPackage)
+        val error = FollowUpPromptSender.send(context, mode, phone, outgoingMessage, preferredWhatsAppPackage)
         if (error == null) onDone() else status = error
     }
 
@@ -3029,9 +3083,9 @@ private fun MissedCallPromptScreen(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
-                                    if (showVCard) {
+                                    if (showCard) {
                                         Spacer(modifier = Modifier.height(10.dp))
-                                        PromptVCardElement(name = cardName)
+                                        ContactTextCardBubble(raw = cardText)
                                     }
                                 }
                                 // Meta: timestamp + static double-check.
@@ -3166,40 +3220,6 @@ private fun MissedCallPromptScreen(
         }
     }
 }
-
-/** The static vCard element drawn inside the artifact bubble (ended moment, card enabled). */
-@Composable
-private fun PromptVCardElement(name: String) {
-    val initials = name.trim().split(" ").filter { it.isNotBlank() }.take(2)
-        .joinToString("") { it.take(1) }.ifBlank { "דל" }
-    Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE9EDEF)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(PromptVCardAvatar),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-            Column {
-                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccessibilityColors.TextStrong, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("איש קשר (.vcf)", fontSize = 12.sp, color = AccessibilityColors.TextMuted)
-            }
-        }
-    }
-}
-
 
 // ===================== SCREEN 5 — ACTIVITY =====================
 @Composable

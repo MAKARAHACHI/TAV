@@ -54,6 +54,21 @@ class SignatureLineTest {
     }
 
     @Test
+    fun removeFromStripsTheTrailingSignatureForARoundTrip() {
+        val body = "תודה על השיחה!"
+        val composed = SignatureLine.append(body, fullCard)
+        assertEquals(body, SignatureLine.removeFrom(composed, fullCard))
+        // Strip then re-append reproduces the composed message exactly.
+        assertEquals(composed, SignatureLine.append(SignatureLine.removeFrom(composed, fullCard), fullCard))
+    }
+
+    @Test
+    fun removeFromLeavesABodyWithoutASignatureUntouched() {
+        val body = "תודה על השיחה!"
+        assertEquals(body, SignatureLine.removeFrom(body, fullCard))
+    }
+
+    @Test
     fun readsTheSameFieldsAsTheContactCard() {
         val profile = MyDetailsProfile(agentName = "דני לוי", officeName = "עו\"ד מקרקעין", phone = "052-1234567")
         assertEquals(SignatureLine.render(fullCard), SignatureLine.render(profile))

@@ -40,6 +40,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val logStore = FollowUpLogStore(context)
     private val templateStore = TemplateStore(context)
     private val profileStore = MyDetailsStore(context)
+    private val missedCardSettings = com.followupnadlan.accessibility.MissedCardSettings(context)
     private val smsSender = SmsSender(context)
     private val manualReplyNotificationHelper = MissedCallManualReplyNotificationHelper(context)
     private val whatsAppPackageResolver = WhatsAppPackageResolver(context)
@@ -502,6 +503,26 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     }
 
     /**
+     * The full outgoing missed-call message. The one-line signature always closes it (§5, unchanged
+     * — on missed the signature is how the client knows who is answering). When the missed moment's
+     * card toggle is ON, the formatted TEXT business card is appended too, and the template's own
+     * website/card link lines are suppressed so the website is not shown twice — the card owns them.
+     * The composed string is exactly what the preview shows (§2).
+     */
+    private fun renderMissedMessage(template: MessageTemplate): String {
+        val profile = profileStore.load()
+        val card = ContactCard.fromProfile(profile)
+        return if (missedCardSettings.cardAttached) {
+            // Card on: raw body (no link lines), tag-rendered, + signature, then the text card.
+            val bodyPlusSignature = renderMessage(template.body, attachCard = true)
+            com.followupnadlan.templates.ContactTextCard.append(bodyPlusSignature, card)
+        } else {
+            // Card off: unchanged — body + link lines + signature.
+            renderMessage(MessageComposition.build(template), attachCard = true)
+        }
+    }
+
+    /**
      * A missed-call reply that did not go out. §2: without this the user believes their client
      * was answered when they were not — the most damaging false belief the app can create, since
      * the whole promise is "nobody is left without a reply".
@@ -569,7 +590,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
             role = TemplateRole.MISSED_CALL,
             selectedIdForRole = settings.selectedMissedTemplateId
         )
-        val message = MissedCallMessageResolver.renderTemplate(template, ::renderMessage)
+        val message = template?.let { renderMissedMessage(it) }.orEmpty()
         val whatsappPackages = whatsAppPackageResolver.resolve(settings.preferredWhatsAppPackage)
         return MissedCallEvaluation(
             rawPhone = phone,

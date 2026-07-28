@@ -42,4 +42,21 @@ object SignatureLine {
             else -> "$trimmedBody\n$signature"
         }
     }
+
+    /**
+     * Removes the trailing signature line (and its separator) from [message] if present, so a call
+     * site that receives an already-composed message can re-derive the pure body and re-append the
+     * signature through one path — keeping preview == sent and never doubling the signature (§2).
+     * Returns [message] trimmed when no signature is present or the profile is empty.
+     */
+    fun removeFrom(message: String, card: ContactCard): String {
+        val signature = render(card)
+        val trimmed = message.trim()
+        if (signature.isEmpty()) return trimmed
+        return when {
+            trimmed == signature -> ""
+            trimmed.endsWith("\n$signature") -> trimmed.removeSuffix("\n$signature").trim()
+            else -> trimmed
+        }
+    }
 }

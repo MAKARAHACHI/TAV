@@ -55,8 +55,7 @@ internal fun MessageEditorScreen(
     body: String,
     signature: String,
     cardAttached: Boolean,
-    cardInitials: String = "דל",
-    cardLine1: String = "דני לוי",
+    cardText: String = "",
     titleOverride: String? = null,
     showCardToggle: Boolean = true,
     onToggleCardAttached: (() -> Unit)?,
@@ -137,48 +136,12 @@ internal fun MessageEditorScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(signature, fontSize = 13.sp, lineHeight = 20.sp, color = AccessibilityColors.TextMuted)
                         }
-                        // vCard preview inside the bubble (edit-after-call.html .vcard-preview) —
-                        // avatar initials + name + "איש קשר (.vcf)" + chevron. Shown/hidden live
-                        // by the vCard toggle exactly like the HTML script.
-                        if (isEnded && cardAttached) {
+                        // Formatted TEXT business card inside the bubble — shown/hidden live by the
+                        // card toggle. It is the exact text that is also sent (§2), rendered with
+                        // WhatsApp *bold* / link / italic styling.
+                        if (isEnded && cardAttached && cardText.isNotBlank()) {
                             Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(AccessibilityColors.Surface)
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(androidx.compose.foundation.shape.CircleShape)
-                                        .background(
-                                            androidx.compose.ui.graphics.Brush.linearGradient(
-                                                listOf(
-                                                    androidx.compose.ui.graphics.Color(0xFF17B3A3),
-                                                    androidx.compose.ui.graphics.Color(0xFF128C7E)
-                                                )
-                                            )
-                                        ),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(cardInitials, color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(cardLine1, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AccessibilityColors.TextStrong)
-                                    Text("איש קשר (.vcf)", fontSize = 12.sp, color = AccessibilityColors.TextMuted)
-                                }
-                                Icon(
-                                    AccessibilityIcons.ChevronStart,
-                                    contentDescription = null,
-                                    tint = androidx.compose.ui.graphics.Color(0xFF128C7E),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                            ContactTextCardBubble(raw = cardText)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
