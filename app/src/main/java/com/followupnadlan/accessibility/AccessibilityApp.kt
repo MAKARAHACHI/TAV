@@ -109,6 +109,7 @@ import com.followupnadlan.setup.PermissionSnapshot
 import com.followupnadlan.setup.PermissionStatusLogic
 import com.followupnadlan.sharing.ContactCardShareResult
 import com.followupnadlan.sharing.PrepareAndShareContactCard
+import com.followupnadlan.templates.CardEmojiInput
 import com.followupnadlan.templates.ContactTextCard
 import com.followupnadlan.templates.MessageComposition
 import com.followupnadlan.templates.MessageTemplate
@@ -4059,6 +4060,7 @@ private fun SignatureCardEditorScreen(
     var occupation by remember { mutableStateOf(profile.officeName) }
     var phone by remember { mutableStateOf(profile.phone) }
     var website by remember { mutableStateOf(profile.website) }
+    var cardEmoji by remember { mutableStateOf(profile.cardEmoji) }
     var contactsGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CONTACTS)) }
 
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
@@ -4066,14 +4068,18 @@ private fun SignatureCardEditorScreen(
     ) { granted -> contactsGranted = granted }
 
     fun persist() {
+        val normalizedEmoji = CardEmojiInput.normalize(cardEmoji)
         val trimmed = profile.copy(
             agentName = fullName.trim(),
             officeName = occupation.trim(),
             phone = phone.trim(),
-            website = website.trim()
+            website = website.trim(),
+            cardEmoji = normalizedEmoji
         )
         store.save(trimmed)
         profile = trimmed
+        // Reflect the normalized value back into the field so preview == saved == sent.
+        cardEmoji = normalizedEmoji
     }
 
     val initials = fullName.trim().split(" ").filter { it.isNotBlank() }.take(2)
@@ -4134,6 +4140,16 @@ private fun SignatureCardEditorScreen(
                     value = website,
                     onChange = { website = it },
                     keyboardType = KeyboardType.Uri
+                )
+                LabeledField(
+                    label = "אימוג'י לכרטיס (לא חובה)",
+                    value = cardEmoji,
+                    onChange = { cardEmoji = it }
+                )
+                Text(
+                    "אפשר להשאיר ריק — יופיע לפני השם בכרטיס",
+                    fontSize = 11.sp,
+                    color = AccessibilityColors.TextMuted
                 )
             }
         }

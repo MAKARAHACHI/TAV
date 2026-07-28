@@ -15,9 +15,9 @@ class ContactTextCardTest {
     )
 
     @Test
-    fun fullProfileBuildsEveryBlock() {
+    fun fullProfileBuildsEveryBlockNoLeadingEmojiByDefault() {
         val expected = listOf(
-            "⚖️ *שלמה בן ארצי* │ *עורך דין ומגשר*",
+            "*שלמה בן ארצי* │ *עורך דין ומגשר*",
             "⭐ *חוות דעת וביקורות:*\nhttps://domain.co.il",
             "📱 *לשמירה מהירה באנשי הקשר:*\n054-5555565",
             "_(לחצו על המספר ← הוספה לאנשי קשר)_"
@@ -28,7 +28,27 @@ class ContactTextCardTest {
     @Test
     fun nameOnlyIsJustTheHeaderNoRoleTail() {
         val card = ContactCard(fullName = "שלמה בן ארצי", org = "", phone = "", website = "")
-        assertEquals("⚖️ *שלמה בן ארצי*", ContactTextCard.build(card))
+        assertEquals("*שלמה בן ארצי*", ContactTextCard.build(card))
+    }
+
+    @Test
+    fun emptyEmojiHeaderStartsAtNameWithNoLeadingSpace() {
+        val card = ContactCard(fullName = "דני", org = "", phone = "", website = "", emoji = "")
+        val out = ContactTextCard.build(card)
+        assertEquals("*דני*", out)
+        assertFalse("no leading space", out.startsWith(" "))
+    }
+
+    @Test
+    fun emojiPresentNoRolePrefixesTheHeader() {
+        val card = ContactCard(fullName = "דני", org = "", phone = "", website = "", emoji = "🏠")
+        assertEquals("🏠 *דני*", ContactTextCard.build(card))
+    }
+
+    @Test
+    fun emojiPresentWithRolePrefixesTheHeader() {
+        val card = ContactCard(fullName = "דני", org = "מתווך", phone = "", website = "", emoji = "🏠")
+        assertEquals("🏠 *דני* │ *מתווך*", ContactTextCard.build(card))
     }
 
     @Test

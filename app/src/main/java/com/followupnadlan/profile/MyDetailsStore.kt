@@ -10,6 +10,7 @@ class MyDetailsStore(context: Context) {
         officeName = preferences.getString(KEY_OFFICE_NAME, "").orEmpty(),
         phone = preferences.getString(KEY_PHONE, "").orEmpty(),
         website = preferences.getString(KEY_WEBSITE, "").orEmpty(),
+        cardEmoji = preferences.getString(KEY_CARD_EMOJI, "").orEmpty(),
         businessCard = preferences.getString(KEY_BUSINESS_CARD, "").orEmpty(),
         signature = preferences.getString(KEY_SIGNATURE, "").orEmpty(),
         property1Name = preferences.getString(KEY_PROPERTY_1_NAME, "").orEmpty(),
@@ -27,6 +28,7 @@ class MyDetailsStore(context: Context) {
             .putString(KEY_OFFICE_NAME, profile.officeName)
             .putString(KEY_PHONE, profile.phone)
             .putString(KEY_WEBSITE, profile.website)
+            .putString(KEY_CARD_EMOJI, profile.cardEmoji)
             .putString(KEY_BUSINESS_CARD, profile.businessCard)
             .putString(KEY_SIGNATURE, profile.signature)
             .putString(KEY_PROPERTY_1_NAME, profile.property1Name)
@@ -45,6 +47,7 @@ class MyDetailsStore(context: Context) {
         const val KEY_OFFICE_NAME = "office_name"
         const val KEY_PHONE = "phone"
         const val KEY_WEBSITE = "website"
+        const val KEY_CARD_EMOJI = "card_emoji"
         const val KEY_BUSINESS_CARD = "business_card"
         const val KEY_SIGNATURE = "signature"
         const val KEY_PROPERTY_1_NAME = "property_1_name"

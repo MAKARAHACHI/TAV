@@ -11,7 +11,7 @@ import com.followupnadlan.profile.MyDetailsProfile
  * Output shape (matches design-html/app-text-vcard.html), using WhatsApp `*bold*` / `_italic_`
  * markers that render bold/italic in WhatsApp and stay as plain text in SMS:
  *
- *     ⚖️ *{name}* │ *{role}*
+ *     {emoji} *{name}* │ *{role}*
  *
  *     ⭐ *חוות דעת וביקורות:*
  *     {website}
@@ -21,9 +21,13 @@ import com.followupnadlan.profile.MyDetailsProfile
  *
  *     _(לחצו על המספר ← הוספה לאנשי קשר)_
  *
+ * The leading header emoji is OPTIONAL and comes from the profile ([ContactCard.emoji]). There is
+ * no built-in default glyph: when the profile emoji is blank the header simply starts at `*{name}*`
+ * — never a leading space and never a lone emoji.
+ *
  * §2 — never emit a placeholder or an empty labelled line:
  * - No name ⇒ a nameless card is meaningless ⇒ return "" (the card is not offered at all).
- * - Blank role ⇒ drop the ` │ *{role}*` tail; the header is just `⚖️ *{name}*`.
+ * - Blank role ⇒ drop the ` │ *{role}*` tail; the header is just `*{name}*` (or `{emoji} *{name}*`).
  * - Blank website ⇒ omit the whole "חוות דעת וביקורות" block (label + link).
  * - Blank phone ⇒ omit the whole "לשמירה מהירה" block AND the grey how-to hint (it explains how
  *   to save that number, so it is meaningless without it).
@@ -33,12 +37,6 @@ import com.followupnadlan.profile.MyDetailsProfile
  * Pure value logic, no Android — see ContactTextCardTest.
  */
 object ContactTextCard {
-    /**
-     * The default header emoji. There is no profession/emoji source in the profile yet, so this is
-     * a single documented constant (matches the HTML) — change here to swap the profession glyph.
-     */
-    const val HEADER_EMOJI = "⚖️"
-
     const val REVIEWS_LABEL = "חוות דעת וביקורות:"
     const val SAVE_LABEL = "לשמירה מהירה באנשי הקשר:"
     const val SAVE_HINT = "(לחצו על המספר ← הוספה לאנשי קשר)"
@@ -50,14 +48,17 @@ object ContactTextCard {
         val role = card.org.trim()
         val website = card.website.trim()
         val phone = card.phone.trim()
+        val emoji = card.emoji.trim()
 
         val blocks = mutableListOf<String>()
 
-        // Header — name always, role only when present.
+        // Header — name always; optional leading emoji only when set; role tail only when present.
+        // Empty emoji ⇒ header starts at `*name*` (no leading space, no lone glyph).
+        val prefix = if (emoji.isNotEmpty()) "$emoji " else ""
         blocks += if (role.isNotEmpty()) {
-            "$HEADER_EMOJI *$name* │ *$role*"
+            "$prefix*$name* │ *$role*"
         } else {
-            "$HEADER_EMOJI *$name*"
+            "$prefix*$name*"
         }
 
         // Reviews / website block — only when a website exists.

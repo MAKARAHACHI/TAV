@@ -10,7 +10,9 @@ data class ContactCard(
     val org: String,
     val phone: String,
     /** Optional; shown on the card and in the vCard only when filled. */
-    val website: String = ""
+    val website: String = "",
+    /** Optional leading glyph for the text-card header; empty ⇒ header has no leading emoji. */
+    val emoji: String = ""
 ) {
     /** A card can be shared only once it has at least a name and a phone. */
     val isComplete: Boolean
@@ -21,7 +23,8 @@ data class ContactCard(
             fullName = profile.agentName.trim(),
             org = profile.officeName.trim(),
             phone = profile.phone.trim(),
-            website = profile.website.trim()
+            website = profile.website.trim(),
+            emoji = profile.cardEmoji.trim()
         )
     }
 }

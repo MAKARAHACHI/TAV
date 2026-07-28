@@ -5,6 +5,7 @@ data class MyDetailsProfile(
     val officeName: String = "",
     val phone: String = "",
     val website: String = "",
+    val cardEmoji: String = "",
     val businessCard: String = "",
     val signature: String = "",
     val property1Name: String = "",
