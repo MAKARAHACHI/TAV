@@ -33,21 +33,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** edit.html tag set (missed): name / role / business. */
-private val missedEditorTags = listOf("[השם שלי]", "[תפקיד]", "[שם העסק]")
-
-/** edit-after-call.html tag set (ended): name / role / link. */
-private val endedEditorTags = listOf("[השם שלי]", "[תפקיד]", "[לינק]")
-
 /**
  * Full-screen message editor matching edit.html ("אם לא עניתי") / edit-after-call.html
  * ("אחרי שדיברנו"): nav-bar with a real save action, a live chat-bubble preview that
- * updates as the user types, the textarea, tag-insert buttons, and the moment's own toggles.
+ * updates as the user types, the textarea, and the moment's own toggles.
  *
  * The signature line stays locked (rendered by SignatureLine, not part of the editable body) —
  * see the ended/missed journey docs for why: it is identity, changed in one place (the profile
- * card), not wording. The tag buttons here insert literal bracket-tags into the *body* text for
- * display, matching the HTML's own live-preview trick.
+ * card), not wording. The preview shows the body exactly as it will be sent (§2) — there is no
+ * tag substitution, so no bracket-tag insert buttons.
  */
 @Composable
 internal fun MessageEditorScreen(
@@ -63,7 +57,6 @@ internal fun MessageEditorScreen(
     onBack: () -> Unit
 ) {
     var draft by remember(body) { mutableStateOf(body) }
-    var delaySend by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -127,7 +120,7 @@ internal fun MessageEditorScreen(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text(
-                            resolveDisplayTags(draft).ifBlank { " " },
+                            draft.ifBlank { " " },
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             color = AccessibilityColors.TextStrong
@@ -168,14 +161,6 @@ internal fun MessageEditorScreen(
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 220.dp)
                         )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text("הוסף משתנה חכם:", fontSize = 13.sp, color = AccessibilityColors.TextMuted)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            (if (isEnded) endedEditorTags else missedEditorTags).forEach { tag ->
-                                TagButton(tag = tag, onClick = { draft = "$draft $tag" })
-                            }
-                        }
                     }
                 }
 
@@ -189,13 +174,6 @@ internal fun MessageEditorScreen(
                                     description = "שולח איש קשר לשמירה מהירה בטלפון",
                                     checked = cardAttached,
                                     onToggle = onToggleCardAttached
-                                )
-                                EditorToggleRow(
-                                    emoji = "⏳",
-                                    title = "השהיית שליחה קלה",
-                                    description = "ממתין 2 דקות לפני השליחה כדי להרגיש טבעי יותר",
-                                    checked = delaySend,
-                                    onToggle = { delaySend = !delaySend }
                                 )
                             } else {
                                 EditorToggleRow(
@@ -211,21 +189,6 @@ internal fun MessageEditorScreen(
                 }
             }
         }
-    }
-}
-
-private fun resolveDisplayTags(text: String): String = text
-
-@Composable
-private fun TagButton(tag: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(androidx.compose.ui.graphics.Color(0xFFE8F1FF))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Text("+ $tag", color = AccessibilityColors.Primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
     }
 }
 

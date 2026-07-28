@@ -8,9 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import com.followupnadlan.MainActivity
+import com.followupnadlan.accessibility.FollowUpPromptModeLogic
 import com.followupnadlan.missedcall.ManualSmsReplyActivity
 import com.followupnadlan.R
 import com.followupnadlan.notifications.FollowUpNotificationHelper.Companion.ACTION_OPEN_FOLLOW_UP
+import com.followupnadlan.notifications.FollowUpNotificationHelper.Companion.EXTRA_CALL_TYPE
 import com.followupnadlan.notifications.FollowUpNotificationHelper.Companion.EXTRA_MANUAL_ACTION
 import com.followupnadlan.notifications.FollowUpNotificationHelper.Companion.EXTRA_MESSAGE
 import com.followupnadlan.notifications.FollowUpNotificationHelper.Companion.EXTRA_PHONE
@@ -72,6 +74,11 @@ class MissedCallManualReplyNotificationHelper(private val context: Context) {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_PHONE, phone)
             putExtra(EXTRA_MESSAGE, message)
+            // §2: this helper is the missed-call manual path only. Tag the call type so the
+            // approval sheet opens as MISSED — without it MainActivity reads a null EXTRA_CALL_TYPE
+            // and FollowUpPromptModeLogic.fromCallType defaults to CALL_ENDED (wrong moment's
+            // chrome, templates, and card-attach flag). Same key/value the automatic path uses.
+            putExtra(EXTRA_CALL_TYPE, FollowUpPromptModeLogic.CALL_TYPE_MISSED)
             manualAction?.let { putExtra(EXTRA_MANUAL_ACTION, it) }
         }
         return PendingIntent.getActivity(

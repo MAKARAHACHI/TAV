@@ -77,6 +77,46 @@ class MomentMessageComposerTest {
         assertEquals("תודה על השיחה!", out)
     }
 
+    // FIX 5 / §2: the sheet's saved-template picker chooses a variant body with the SAME rule the
+    // main sheet path uses — raw body when the card is ON (card owns the website), link lines when
+    // OFF. This models that selection to guard against the website double-printing regression.
+    private fun pickerVariantBody(template: MessageTemplate, showCard: Boolean): String =
+        if (showCard) template.body.trim() else MessageComposition.build(template)
+
+    @Test
+    fun pickerVariantCardOnUsesRawBodyAndWebsiteAppearsOnce() {
+        val template = MessageTemplate(
+            id = "t1",
+            title = "ended",
+            body = "תודה על השיחה!",
+            cardLink = "",
+            websiteLink = "https://domain.co.il",
+            role = TemplateRole.CALL_ENDED
+        )
+        val picked = pickerVariantBody(template, showCard = true)
+        // Raw body only — no template link line.
+        assertFalse(picked.contains(MessageComposition.WEBSITE_LABEL))
+        // What is actually sent: picked body + text card. Website must appear exactly once.
+        val out = ContactTextCard.append(picked, card)
+        assertEquals(1, Regex(Regex.escape("https://domain.co.il")).findAll(out).count())
+    }
+
+    @Test
+    fun pickerVariantCardOffKeepsLinkLine() {
+        val template = MessageTemplate(
+            id = "t1",
+            title = "ended",
+            body = "תודה על השיחה!",
+            cardLink = "",
+            websiteLink = "https://domain.co.il",
+            role = TemplateRole.CALL_ENDED
+        )
+        val picked = pickerVariantBody(template, showCard = false)
+        // Card OFF ⇒ unchanged: the template's own link line is present.
+        assertTrue(picked.contains(MessageComposition.WEBSITE_LABEL))
+        assertTrue(picked.contains("https://domain.co.il"))
+    }
+
     @Test
     fun templateOverloadUsesRawBodyWhenCardOnAndDropsSignature() {
         val template = MessageTemplate(

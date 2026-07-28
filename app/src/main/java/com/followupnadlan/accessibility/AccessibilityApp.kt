@@ -2077,7 +2077,11 @@ private fun HomeScreen(
             emoji = "🤝",
             title = "אחרי שדיברנו",
             body = endedBody,
-            signature = "",
+            // §2: pass the real signature (same as the other two moments). The send path appends
+            // the signature when the card is OFF, so Home's ended preview must show it too. When the
+            // ended card is ON, the accordion body's cardShown guard suppresses the standalone
+            // signature (card replaces it) — preview stays == sent either way.
+            signature = signature,
             time = "11:05",
             // Ended never auto-sends.
             sendMode = MissedSendModeLabel.MANUAL,
@@ -3219,7 +3223,11 @@ private fun MissedCallPromptScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 roleTemplates.forEach { variant ->
-                                    val body = MessageComposition.build(variant)
+                                    // §2: mirror the main sheet path (fallbackBody above). When the
+                                    // card is ON it OWNS the website line, so use the raw template
+                                    // body (no link lines) — otherwise picking a variant would print
+                                    // the website twice (body link + card). Card OFF ⇒ unchanged.
+                                    val body = if (showCard) variant.body.trim() else MessageComposition.build(variant)
                                     val selected = body == draft
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
@@ -4126,8 +4134,8 @@ private fun SignatureCardEditorScreen(
         AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("📝 פרטים אישיים", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = AccessibilityColors.Heading)
-                LabeledField(label = "שם מלא (יופיע ב-[השם שלי])", value = fullName, onChange = { fullName = it })
-                LabeledField(label = "תפקיד / מקצוע (יופיע ב-[תפקיד] ו-[שם העסק])", value = occupation, onChange = { occupation = it })
+                LabeledField(label = "שם מלא (יופיע בחתימה ובכרטיס הביקור)", value = fullName, onChange = { fullName = it })
+                LabeledField(label = "תפקיד / מקצוע (יופיע בחתימה ובכרטיס הביקור)", value = occupation, onChange = { occupation = it })
                 LabeledField(
                     label = "מספר טלפון לכרטיס הביקור",
                     value = phone,
