@@ -803,6 +803,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                     modal = AccessibilityModal.SETUP
                                 }
                             },
+                            // "✏️ ערוך פרטים" on the My-Card asset opens the existing global profile
+                            // editor via the same boolean that already gates SignatureCardEditorScreen.
+                            onEditCard = { cardEditorOpen = true },
                             onOpenSystemSettings = { modal = AccessibilityModal.SYSTEM_SETTINGS }
                         )
                         }
@@ -1516,7 +1519,9 @@ private fun MomentEditScreen(
                             fontSize = 15.sp,
                             lineHeight = 22.sp
                         )
-                        if (signature.isNotBlank()) {
+                        // Card ON ⇒ the card replaces the one-line signature, so the standalone
+                        // signature is not drawn (preview == sent).
+                        if (!(cardAttached && cardText.isNotBlank()) && signature.isNotBlank()) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = signature,
@@ -1966,6 +1971,7 @@ private fun HomeScreen(
     onOpenEndedJourney: () -> Unit,
     onOpenNoAnswerJourney: () -> Unit,
     onResolveWarning: () -> Unit,
+    onEditCard: () -> Unit,
     onOpenSystemSettings: () -> Unit
 ) {
     val colors = AccessibilityExtra.colors
@@ -2039,6 +2045,12 @@ private fun HomeScreen(
         warning?.let {
             HomeWarningRow(text = HomeWarningLogic.message(it), onClick = onResolveWarning)
         }
+
+        // MY-CARD ASSET — the global "כרטיס הביקור שלי". A calm display of the one shared text card
+        // (from MyDetailsStore, the same string that is sent), plus a single "✏️ ערוך פרטים" affordance
+        // that opens the existing SignatureCardEditorScreen. No editable fields on Home. Empty profile
+        // shows a gentle prompt, never a blank bubble (§2).
+        HomeMyCardAsset(cardText = cardText, onEditCard = onEditCard)
 
         Text("התרחישים שלך (3)", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = colors.heading)
 
@@ -2133,6 +2145,88 @@ private fun HomeMasterCard(checked: Boolean, onToggle: () -> Unit) {
                 )
             }
             Switch(checked = checked, onCheckedChange = { onToggle() })
+        }
+    }
+}
+
+/**
+ * MY-CARD ASSET — the global "כרטיס הביקור שלי" card at the top of Home. Displays the single shared
+ * text business card ([cardText], the exact string that is also sent, from MyDetailsStore) using the
+ * SAME styled renderer the moment bubbles use ([ContactTextCardBubble]) so preview == sent (§2). One
+ * discreet "✏️ ערוך פרטים" affordance opens the existing global profile editor via [onEditCard]. When
+ * the profile has no name ([cardText] blank), a gentle prompt is shown instead of a blank bubble.
+ * Display + one edit action only — no editable fields live on Home.
+ */
+@Composable
+private fun HomeMyCardAsset(cardText: String, onEditCard: () -> Unit) {
+    val colors = AccessibilityExtra.colors
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = colors.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x0A000000)),
+        shadowElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(text = "🪪", fontSize = 17.sp)
+                    Text(
+                        text = "כרטיס הביקור שלי",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = colors.textStrong
+                    )
+                }
+                // The single edit affordance → opens the existing SignatureCardEditorScreen.
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.primary.copy(alpha = 0.3f)),
+                    modifier = Modifier.clickable(onClick = onEditCard)
+                ) {
+                    Text(
+                        text = "✏️ ערוך פרטים",
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (cardText.isBlank()) {
+                // Empty profile — gentle prompt, never a blank bubble (§2).
+                Text(
+                    text = "עדיין לא הגדרת כרטיס ביקור. הוסיפו את הפרטים שלכם כדי לצרף אותם להודעות ההמשך.",
+                    color = colors.textMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            } else {
+                // WhatsApp chat-bubble on the chat background, matching the moment previews.
+                Surface(
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
+                    color = Color(0xFFD9FDD3),
+                    shadowElevation = 1.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFEFEAE2), RoundedCornerShape(12.dp))
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        ContactTextCardBubble(raw = cardText)
+                    }
+                }
+            }
         }
     }
 }
@@ -2380,7 +2474,11 @@ private fun HomeAccordionCard(
                                 fontSize = 14.sp,
                                 lineHeight = 20.sp
                             )
-                            if (signature.isNotBlank()) {
+                            // Card ON ⇒ the formatted card replaces the one-line signature (name/role/
+                            // phone live in the card), so the standalone signature is not drawn — same
+                            // rule as the edit hero, keeping preview == sent (§2).
+                            val cardShown = card?.text?.isNotBlank() == true
+                            if (!cardShown && signature.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = signature,
@@ -2966,11 +3064,15 @@ private fun MissedCallPromptScreen(
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }
 
-    // The exact text that goes out, built from the SAME pieces the bubble previews (§2): the
-    // edited/approved body, closed by the one-line signature, then the formatted text card when
-    // this moment's card is attached. Preview == sent for every moment.
-    val outgoingMessage = SignatureLine.append(resolvedMessage, card)
-        .let { if (showCard) ContactTextCard.append(it, card) else it }
+    // The exact text that goes out, built from the SAME pieces the bubble previews (§2). When the
+    // card is attached it REPLACES the one-line signature (name/role/phone live in the card), so
+    // only the body + text card are sent. When the card is off, the one-line signature closes the
+    // body as before. Preview == sent for every moment.
+    val outgoingMessage = if (showCard) {
+        ContactTextCard.append(resolvedMessage, card)
+    } else {
+        SignatureLine.append(resolvedMessage, card)
+    }
 
     fun send() {
         val error = FollowUpPromptSender.send(context, mode, phone, outgoingMessage, preferredWhatsAppPackage)
@@ -3073,7 +3175,9 @@ private fun MissedCallPromptScreen(
                                         fontSize = 15.sp,
                                         lineHeight = 22.sp
                                     )
-                                    if (signature.isNotBlank()) {
+                                    // Card ON ⇒ the card replaces the one-line signature, so the
+                                    // standalone signature is not drawn (preview == sent).
+                                    if (!showCard && signature.isNotBlank()) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         Text(
                                             text = signature,

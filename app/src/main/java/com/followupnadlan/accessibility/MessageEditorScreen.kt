@@ -132,14 +132,18 @@ internal fun MessageEditorScreen(
                             lineHeight = 22.sp,
                             color = AccessibilityColors.TextStrong
                         )
-                        if (signature.isNotBlank()) {
+                        // Card ON ⇒ the formatted card replaces the one-line signature (name/role/
+                        // phone live in the card), so the standalone signature is not drawn —
+                        // keeping preview == sent (§2).
+                        val cardShown = isEnded && cardAttached && cardText.isNotBlank()
+                        if (!cardShown && signature.isNotBlank()) {
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(signature, fontSize = 13.sp, lineHeight = 20.sp, color = AccessibilityColors.TextMuted)
                         }
                         // Formatted TEXT business card inside the bubble — shown/hidden live by the
                         // card toggle. It is the exact text that is also sent (§2), rendered with
                         // WhatsApp *bold* / link / italic styling.
-                        if (isEnded && cardAttached && cardText.isNotBlank()) {
+                        if (cardShown) {
                             Spacer(modifier = Modifier.height(10.dp))
                             ContactTextCardBubble(raw = cardText)
                         }

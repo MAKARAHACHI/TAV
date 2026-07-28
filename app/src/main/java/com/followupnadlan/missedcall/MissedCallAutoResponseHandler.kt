@@ -503,19 +503,20 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     }
 
     /**
-     * The full outgoing missed-call message. The one-line signature always closes it (§5, unchanged
-     * — on missed the signature is how the client knows who is answering). When the missed moment's
-     * card toggle is ON, the formatted TEXT business card is appended too, and the template's own
-     * website/card link lines are suppressed so the website is not shown twice — the card owns them.
-     * The composed string is exactly what the preview shows (§2).
+     * The full outgoing missed-call message. When the missed moment's card toggle is ON, the
+     * formatted TEXT business card REPLACES the one-line signature (name/role/phone live in the
+     * card, so the separate signature line is dropped to avoid saying it twice), and the template's
+     * own website/card link lines are suppressed so the website is not shown twice — the card owns
+     * them. When the card is OFF, the one-line signature closes the body as before (§5). The
+     * composed string is exactly what the preview shows (§2).
      */
     private fun renderMissedMessage(template: MessageTemplate): String {
         val profile = profileStore.load()
         val card = ContactCard.fromProfile(profile)
         return if (missedCardSettings.cardAttached) {
-            // Card on: raw body (no link lines), tag-rendered, + signature, then the text card.
-            val bodyPlusSignature = renderMessage(template.body, attachCard = true)
-            com.followupnadlan.templates.ContactTextCard.append(bodyPlusSignature, card)
+            // Card on: raw body (no link lines), tag-rendered, NO signature — the text card replaces it.
+            val rawBody = renderMessage(template.body, attachCard = false)
+            com.followupnadlan.templates.ContactTextCard.append(rawBody, card)
         } else {
             // Card off: unchanged — body + link lines + signature.
             renderMessage(MessageComposition.build(template), attachCard = true)

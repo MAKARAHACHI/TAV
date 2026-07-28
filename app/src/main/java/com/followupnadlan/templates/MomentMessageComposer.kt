@@ -11,9 +11,11 @@ import com.followupnadlan.profile.ContactCard
  * Layout when the card is attached:
  *
  *     <template body, WITHOUT the old link lines>
- *     <one-line signature>            (unchanged behaviour — the signature is not "the card")
  *
- *     <formatted text business card>  (owns the website + phone presentation)
+ *     <formatted text business card>  (owns the name/role/website/phone presentation)
+ *
+ * When the card is on the card REPLACES the one-line signature — the name/role/phone already live
+ * in the card, so the separate `{name}·{role}·{phone}` line is dropped to avoid saying it twice.
  *
  * When the card is NOT attached, behaviour is exactly as before: the template body with its own
  * link lines ([MessageComposition]) plus the one-line signature.
@@ -44,9 +46,9 @@ object MomentMessageComposer {
             return EndedMessageComposer.compose(bodyWithLinks, card, attachCard = false)
                 .let { withSignature(it, card) }
         }
-        // Card on: raw body (no link lines) + signature, then the text card owns website/phone.
-        val bodyPlusSignature = withSignature(bodyWithoutLinks.trim(), card)
-        return ContactTextCard.append(bodyPlusSignature, card)
+        // Card on: raw body (no link lines), then the text card — which REPLACES the one-line
+        // signature (name/role/phone live in the card). No signature is appended here.
+        return ContactTextCard.append(bodyWithoutLinks.trim(), card)
     }
 
     /** Convenience for the common template-driven case. */
