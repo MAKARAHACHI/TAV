@@ -62,6 +62,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,6 +99,8 @@ import com.followupnadlan.profile.ContactCard
 import com.followupnadlan.profile.MyDetailsProfile
 import com.followupnadlan.profile.MyDetailsStore
 import com.followupnadlan.profile.SignatureLine
+import com.followupnadlan.setup.FollowUpOptionalCapability
+import com.followupnadlan.setup.FollowUpPermission
 import com.followupnadlan.setup.PermissionSnapshot
 import com.followupnadlan.setup.PermissionStatusLogic
 import com.followupnadlan.sharing.ContactCardShareResult
@@ -311,13 +316,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var approvalMode by remember {
         mutableStateOf(MomentApprovalModeMapper.fromWhatsAppMode(settings.whatsappMode))
     }
-    // "הגבלת תדירות" — the 24h no-repeat rule. ON ⇒ same-number cooldown = 24h (the existing
-    // default); OFF ⇒ no wait. Backed by FollowUpCooldownSettings.sameNumberCooldownMillis (the
-    // ended/no-answer decider's brake) and mirrored into settings.cooldownMillis (the missed
-    // decider's brake) so every moment's 24h toggle is honored by the path that sends it.
-    var frequencyLimitOn by remember {
-        mutableStateOf(cooldownSettings.sameNumberCooldownMillis != null)
-    }
+    // The two GLOBAL timing brakes, now surfaced on every moment's edit page (moved out of Settings,
+    // replacing the old 24h on/off toggle). sameNumber = "אל תשלח שוב לאותו אדם" (also mirrored into
+    // settings.cooldownMillis for the missed path); globalQuiet = "מרווח מינימלי בין הודעות". null = off.
+    var sameNumberCooldown by remember { mutableStateOf(cooldownSettings.sameNumberCooldownMillis) }
+    var globalQuiet by remember { mutableStateOf(cooldownSettings.globalQuietMillis) }
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
     // The ended moment's own scope — a separate decision from missed (different jobs, §4).
     var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
@@ -360,7 +363,29 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var noAnswerMomentEnabled by remember { mutableStateOf(settings.noAnswerMomentEnabled) }
     var phoneStateGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_PHONE_STATE)) }
     var callLogGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CALL_LOG)) }
+    var contactsGranted by remember { mutableStateOf(context.hasPermission(Manifest.permission.READ_CONTACTS)) }
+    // Whether our Accessibility service is enabled (the automatic-missed-send capability). Read live
+    // from the controller; re-read on resume so returning from the OS accessibility screen updates
+    // the Home chip and the Settings row. NOT cached forever (§2: Home must not claim "אוטומטי" when
+    // the grant was later revoked).
+    var accessibilityEnabled by remember { mutableStateOf(whatsAppAutoSendController.isAccessibilityServiceEnabled()) }
     var diagnosticsSnapshot by remember { mutableStateOf(callDetectionDiagnostics.snapshot()) }
+    // Re-read the runtime permissions + the accessibility grant every time the app returns to the
+    // foreground. The user flips these in OS screens (app-details / accessibility list) and comes
+    // back; on ON_RESUME we refresh so every dependent surface reflects live state.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                phoneStateGranted = context.hasPermission(Manifest.permission.READ_PHONE_STATE)
+                callLogGranted = context.hasPermission(Manifest.permission.READ_CALL_LOG)
+                contactsGranted = context.hasPermission(Manifest.permission.READ_CONTACTS)
+                accessibilityEnabled = whatsAppAutoSendController.isAccessibilityServiceEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val preferredWhatsAppPackage = when (preferredWhatsApp) {
         WhatsAppChoice.BUSINESS -> WhatsAppPackageResolver.WHATSAPP_BUSINESS_PACKAGE
         WhatsAppChoice.REGULAR -> WhatsAppPackageResolver.WHATSAPP_MESSENGER_PACKAGE
@@ -434,21 +459,22 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         askBeforeSend = mode == MomentApprovalMode.MANUAL
     }
 
-    // Shared moment-edit handler: the 24h no-repeat toggle. ON ⇒ 24h same-number cooldown; OFF ⇒
-    // no wait. Written to both cooldown brakes so the missed path (settings.cooldownMillis) and the
-    // ended/no-answer path (FollowUpCooldownSettings.sameNumberCooldownMillis) both honor it.
-    fun onMomentToggleFrequencyLimit() {
-        val next = !frequencyLimitOn
-        frequencyLimitOn = next
-        if (next) {
-            cooldownSettings.sameNumberCooldownMillis = FollowUpCooldownSettings.DEFAULT_SAME_NUMBER_MILLIS
-            settings.cooldownMillis = FollowUpCooldownSettings.DEFAULT_SAME_NUMBER_MILLIS
-        } else {
-            cooldownSettings.sameNumberCooldownMillis = null
-            // settings.cooldownMillis has a 60s floor (cannot be truly zero); the smallest allowed
-            // value is the closest this brake gets to "off" for the missed moment.
-            settings.cooldownMillis = 0L
-        }
+    // Moment-edit handler: pick a same-number cooldown interval (or OFF). Writes the SAME global
+    // brake the old Settings card wrote (sameNumberCooldownMillis) AND mirrors into the missed path's
+    // settings.cooldownMillis, exactly as the old 24h toggle did — the send engine is unchanged; only
+    // the control's location and granularity moved.
+    fun onSelectSameNumberCooldown(millis: Long?) {
+        sameNumberCooldown = millis
+        cooldownSettings.sameNumberCooldownMillis = millis
+        // settings.cooldownMillis floors at 60s and can't be truly zero; 0L is the closest to "off".
+        settings.cooldownMillis = millis ?: 0L
+    }
+
+    // Moment-edit handler: pick the global minimum interval between any two messages (or OFF). Writes
+    // the same global brake the old Settings card wrote (globalQuietMillis). Engine unchanged.
+    fun onSelectGlobalQuiet(millis: Long?) {
+        globalQuiet = millis
+        cooldownSettings.globalQuietMillis = millis
     }
 
     // Shared moment-edit handler: pick "מי יקבל את ההודעה?" for a moment. null = "כמו הכללי" (follow
@@ -516,11 +542,21 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     ) {
         phoneStateGranted = context.hasPermission(Manifest.permission.READ_PHONE_STATE)
         callLogGranted = context.hasPermission(Manifest.permission.READ_CALL_LOG)
+        contactsGranted = context.hasPermission(Manifest.permission.READ_CONTACTS)
         settings.isEnabled = true
         callDetectionPreferences.setEnabled(true)
         bridgingEnabled = true
         applyCallDetectionServiceState(appContext, bridgeEnabled = true, phoneStateGranted, callLogGranted)
         diagnosticsSnapshot = callDetectionDiagnostics.snapshot()
+    }
+    // Requests exactly one runtime permission from a Settings row's "אפשר" action, then refreshes
+    // the matching state so the row flips to ✓ without leaving the screen.
+    val singlePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        phoneStateGranted = context.hasPermission(Manifest.permission.READ_PHONE_STATE)
+        callLogGranted = context.hasPermission(Manifest.permission.READ_CALL_LOG)
+        contactsGranted = context.hasPermission(Manifest.permission.READ_CONTACTS)
     }
 
     // Fresh install shows "WhatsApp רגיל" as the default; persist it so storage matches the UI
@@ -721,6 +757,12 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             noAnswerCardAttached = noAnswerCardAttached,
                             cardInitials = cardInitials,
                             cardLine1 = cardLine1,
+                            // The missed card's send-mode chip. §2: "נשלח אוטומטי" only when the moment
+                            // is AUTOMATIC AND the Accessibility service is actually enabled; else "ידני".
+                            missedSendMode = MissedSendModeLabel.of(
+                                approvalIsAutomatic = approvalMode == MomentApprovalMode.AUTOMATIC,
+                                accessibilityEnabled = accessibilityEnabled
+                            ),
                             onToggleMaster = {
                                 if (bridgingEnabled) {
                                     settings.isEnabled = false
@@ -931,7 +973,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
-                            frequencyLimitOn = frequencyLimitOn,
+                            accessibilityEnabled = accessibilityEnabled,
+                            sameNumberCooldown = sameNumberCooldown,
+                            globalQuiet = globalQuiet,
                             scopeOverride = missedScopeOverride,
                             cardAttached = missedCardAttached,
                             selectedPeoplePreview = selectedPeoplePreviewFor(missedScopeOverride),
@@ -942,7 +986,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             },
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
-                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
+                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
+                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.MISSED, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.MISSED) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -965,7 +1011,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
-                            frequencyLimitOn = frequencyLimitOn,
+                            accessibilityEnabled = accessibilityEnabled,
+                            sameNumberCooldown = sameNumberCooldown,
+                            globalQuiet = globalQuiet,
                             scopeOverride = endedScopeOverride,
                             cardAttached = endedCardAttached,
                             selectedPeoplePreview = selectedPeoplePreviewFor(endedScopeOverride),
@@ -976,7 +1024,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             },
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
-                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
+                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
+                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.ENDED, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.ENDED) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -999,7 +1049,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
-                            frequencyLimitOn = frequencyLimitOn,
+                            accessibilityEnabled = accessibilityEnabled,
+                            sameNumberCooldown = sameNumberCooldown,
+                            globalQuiet = globalQuiet,
                             scopeOverride = noAnswerScopeOverride,
                             cardAttached = noAnswerCardAttached,
                             selectedPeoplePreview = selectedPeoplePreviewFor(noAnswerScopeOverride),
@@ -1010,7 +1062,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             },
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
-                            onToggleFrequencyLimit = ::onMomentToggleFrequencyLimit,
+                            onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
+                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
+                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
                             onSelectScope = { onMomentSelectScope(MomentEditKind.NO_ANSWER, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.NO_ANSWER) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -1022,13 +1076,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         permissions = PermissionSnapshot(
                             phoneStateGranted = phoneStateGranted,
                             callLogGranted = callLogGranted,
-                            contactsGranted = context.hasPermission(Manifest.permission.READ_CONTACTS)
+                            contactsGranted = contactsGranted,
+                            accessibilityEnabled = accessibilityEnabled
                         ),
                         exclusionsPreview = remember(recipientsRefresh) {
                             RecipientPreviewLogic.summary(exclusionsStore.load().map { it.label })
                         },
                         diagnosticsSnapshot = diagnosticsSnapshot,
-                        cooldownSettings = cooldownSettings,
                         onRequestPermissions = {
                             callDetectionPermissionLauncher.launch(
                                 arrayOf(
@@ -1038,6 +1092,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                                 )
                             )
                         },
+                        // Per-permission "אפשר": request exactly that one runtime permission.
+                        onRequestPermission = { permission ->
+                            singlePermissionLauncher.launch(androidPermissionFor(permission))
+                        },
+                        // The optional Accessibility row's "הפעל": open the OS accessibility list so
+                        // the user can flip our service on. State refreshes on resume.
+                        onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
                         onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
                         onOpenHistory = { modal = AccessibilityModal.HISTORY },
                         onOpenSupport = { modal = AccessibilityModal.SUPPORT },
@@ -1370,7 +1431,9 @@ private fun MomentEditScreen(
     availableChannels: List<FollowUpChannel>,
     selectedChannel: FollowUpChannel,
     approvalMode: MomentApprovalMode,
-    frequencyLimitOn: Boolean,
+    accessibilityEnabled: Boolean,
+    sameNumberCooldown: Long?,
+    globalQuiet: Long?,
     scopeOverride: RecipientScope?,
     cardAttached: Boolean,
     selectedPeoplePreview: RecipientPreview?,
@@ -1378,7 +1441,9 @@ private fun MomentEditScreen(
     onToggleEnabled: () -> Unit,
     onSelectChannel: (FollowUpChannel) -> Unit,
     onSelectApprovalMode: (MomentApprovalMode) -> Unit,
-    onToggleFrequencyLimit: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onSelectSameNumberCooldown: (Long?) -> Unit,
+    onSelectGlobalQuiet: (Long?) -> Unit,
     onSelectScope: (RecipientScope?) -> Unit,
     onToggleCardAttached: () -> Unit,
     onEditSelectedPeople: () -> Unit,
@@ -1532,7 +1597,9 @@ private fun MomentEditScreen(
                 SettingRow(
                     title = "אישור לפני שליחה",
                     subtitle = "האם לשלוח לבד או לבקש אישור",
-                    showDivider = true
+                    // The §2 note below needs to sit above the divider when shown.
+                    showDivider = !(kind == MomentEditKind.MISSED &&
+                        approvalMode == MomentApprovalMode.AUTOMATIC && !accessibilityEnabled)
                 ) {
                     if (kind == MomentEditKind.MISSED) {
                         SettingSelect(
@@ -1552,6 +1619,32 @@ private fun MomentEditScreen(
                             fontSize = 14.sp
                         )
                     }
+                }
+
+                // §2 / TASK 3.3: automatic picked but Accessibility off ⇒ it won't actually auto-send.
+                // Don't block the choice — tell the user + give the one-tap path to the OS screen.
+                if (kind == MomentEditKind.MISSED &&
+                    approvalMode == MomentApprovalMode.AUTOMATIC && !accessibilityEnabled
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            "בחרת שליחה אוטומטית, אבל הרשאת 'נגישות' עדיין כבויה — עד שתפעיל/י אותה, ההודעה לא תישלח לבד.",
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = colors.textMuted
+                        )
+                        Text(
+                            "הפעל נגישות ›",
+                            color = colors.primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            modifier = Modifier.clickable(onClick = onOpenAccessibilitySettings)
+                        )
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F2F5)))
                 }
 
                 // מי יקבל את ההודעה? — real per-moment picker. "כמו הכללי" (null) follows the general
@@ -1586,13 +1679,36 @@ private fun MomentEditScreen(
                     Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
                 }
 
-                // הגבלת תדירות — "אל תשלח שוב לאותו אדם במשך 24 שעות" → cooldown setting.
+                // הגבלת תדירות — moved here from Settings (TASK 4). Two GLOBAL timing brakes, plain
+                // labels. Same-number picks any interval (or "בלי המתנה"); the old on/off toggle maps
+                // to 24h-on / off. Both write the same global cooldownSettings the send path honors.
                 SettingRow(
                     title = "הגבלת תדירות",
-                    subtitle = "אל תשלח שוב לאותו אדם במשך 24 שעות",
+                    subtitle = "כל כמה זמן לשלוח שוב לאותו אדם · חל על כל התרחישים",
+                    showDivider = true
+                ) {
+                    SettingSelect(
+                        selectedLabel = FollowUpCooldownOptions.labelFor(
+                            FollowUpCooldownOptions.sameNumber, sameNumberCooldown
+                        ),
+                        options = FollowUpCooldownOptions.sameNumber.map { it.millis to it.label },
+                        onSelect = onSelectSameNumberCooldown
+                    )
+                }
+
+                // מרווח מינימלי בין הודעות — the anti-burst brake (globalQuietMillis). Also global.
+                SettingRow(
+                    title = "מרווח מינימלי בין הודעות",
+                    subtitle = "מרווח מינימלי בין שתי הודעות · חל על כל התרחישים",
                     showDivider = false
                 ) {
-                    Switch(checked = frequencyLimitOn, onCheckedChange = { onToggleFrequencyLimit() })
+                    SettingSelect(
+                        selectedLabel = FollowUpCooldownOptions.labelFor(
+                            FollowUpCooldownOptions.globalQuiet, globalQuiet
+                        ),
+                        options = FollowUpCooldownOptions.globalQuiet.map { it.millis to it.label },
+                        onSelect = onSelectGlobalQuiet
+                    )
                 }
             }
         }
@@ -1831,6 +1947,7 @@ private fun HomeScreen(
     noAnswerCardAttached: Boolean,
     cardInitials: String,
     cardLine1: String,
+    missedSendMode: String,
     onToggleMaster: () -> Unit,
     onToggleMissed: () -> Unit,
     onToggleEnded: () -> Unit,
@@ -1923,6 +2040,8 @@ private fun HomeScreen(
             body = missedBody,
             signature = signature,
             time = "10:42",
+            // §2: reflects real capability — "נשלח אוטומטי" only when automatic AND Accessibility on.
+            sendMode = missedSendMode,
             enabled = missedEnabled,
             active = missedActive,
             open = openCards.contains(0),
@@ -1938,6 +2057,8 @@ private fun HomeScreen(
             body = endedBody,
             signature = "",
             time = "11:05",
+            // Ended never auto-sends.
+            sendMode = MissedSendModeLabel.MANUAL,
             enabled = endedEnabled,
             active = endedActive,
             open = openCards.contains(1),
@@ -1953,6 +2074,8 @@ private fun HomeScreen(
             body = noAnswerBody,
             signature = signature,
             time = "12:30",
+            // No-answer never auto-sends.
+            sendMode = MissedSendModeLabel.MANUAL,
             enabled = noAnswerEnabled,
             active = noAnswerActive,
             open = openCards.contains(2),
@@ -2005,6 +2128,28 @@ private fun HomeMasterCard(checked: Boolean, onToggle: () -> Unit) {
 }
 
 private data class HomeCardPreview(val initials: String, val line1: String)
+
+/**
+ * The small send-mode pill on an accordion header: "נשלח אוטומטי" (teal) or "ידני" (muted). The
+ * label is resolved upstream by [MissedSendModeLabel] so this stays presentation-only — it never
+ * decides the mode, only shows it.
+ */
+@Composable
+private fun HomeSendModeChip(sendMode: String) {
+    val colors = AccessibilityExtra.colors
+    val isAuto = sendMode == MissedSendModeLabel.AUTOMATIC
+    val bg = if (isAuto) Color(0xFF17B3A3).copy(alpha = 0.12f) else Color(0xFFF0F2F5)
+    val fg = if (isAuto) Color(0xFF17B3A3) else colors.textMuted
+    Surface(shape = RoundedCornerShape(999.dp), color = bg) {
+        Text(
+            text = sendMode,
+            color = fg,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
+    }
+}
 
 /** The ⚠️ line: what the client is experiencing, and the way to fix it. */
 @Composable
@@ -2061,6 +2206,7 @@ private fun HomeAccordionCard(
     body: String,
     signature: String,
     time: String,
+    sendMode: String,
     enabled: Boolean,
     active: Boolean,
     open: Boolean,
@@ -2102,12 +2248,20 @@ private fun HomeAccordionCard(
                 ) {
                     Text(text = emoji, fontSize = 19.sp)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = title,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp,
-                            color = colors.textStrong
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                color = colors.textStrong
+                            )
+                            // Send-mode chip: how this moment sends. Subtle pill; "נשלח אוטומטי" reads
+                            // teal (it acts on its own), "ידני" reads muted.
+                            HomeSendModeChip(sendMode = sendMode)
+                        }
                         if (!open) {
                             Text(
                                 text = body.ifBlank { " " },
@@ -3490,8 +3644,9 @@ private fun SystemSettingsScreen(
     permissions: PermissionSnapshot,
     exclusionsPreview: RecipientPreview,
     diagnosticsSnapshot: CallDetectionDiagnosticsSnapshot,
-    cooldownSettings: FollowUpCooldownSettings,
     onRequestPermissions: () -> Unit,
+    onRequestPermission: (FollowUpPermission) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onOpenSmartRules: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSupport: () -> Unit,
@@ -3500,8 +3655,6 @@ private fun SystemSettingsScreen(
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleted by remember { mutableStateOf(false) }
-    var sameNumberCooldown by remember { mutableStateOf(cooldownSettings.sameNumberCooldownMillis) }
-    var globalQuiet by remember { mutableStateOf(cooldownSettings.globalQuietMillis) }
 
     Column(
         modifier = Modifier
@@ -3540,7 +3693,8 @@ private fun SystemSettingsScreen(
                     )
                 }
 
-                // One row per permission, each stating what the user gets from it.
+                // One row per REQUIRED permission, each stating what the user gets from it. Ungranted
+                // rows carry an inline "אפשר" that requests exactly that one permission.
                 PermissionStatusLogic.all.forEach { permission ->
                     val granted = permissions.isGranted(permission)
                     Row(
@@ -3560,6 +3714,62 @@ private fun SystemSettingsScreen(
                             lineHeight = 20.sp,
                             color = AccessibilityColors.TextBody,
                             modifier = Modifier.weight(1f)
+                        )
+                        if (!granted) {
+                            PermissionRowAction(text = "אפשר", onClick = { onRequestPermission(permission) })
+                        }
+                    }
+                }
+
+                // OPTIONAL capabilities, visually separated from the required three so a manual-only
+                // user is never told they're "missing" something essential (§2). Accessibility only
+                // unlocks automatic sending on missed calls.
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(AccessibilityColors.CardBorder))
+                Text(
+                    "לא חובה",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccessibilityColors.TextFaint
+                )
+                PermissionStatusLogic.optional.forEach { capability ->
+                    val granted = permissions.isGranted(capability)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp)
+                    ) {
+                        Icon(
+                            if (granted) AccessibilityIcons.CheckCircle else AccessibilityIcons.Block,
+                            contentDescription = null,
+                            tint = if (granted) AccessibilityColors.Green else AccessibilityColors.TextFaint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                PermissionStatusLogic.title(capability),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                lineHeight = 18.sp,
+                                color = AccessibilityColors.TextStrong
+                            )
+                            Text(
+                                PermissionStatusLogic.outcome(capability),
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
+                                color = AccessibilityColors.TextMuted
+                            )
+                        }
+                        if (!granted && capability == FollowUpOptionalCapability.ACCESSIBILITY) {
+                            PermissionRowAction(text = "הפעל", onClick = onOpenAccessibilitySettings)
+                        }
+                    }
+                    // Multi-tap OS flow: name the exact item the user will see (matches the manifest label).
+                    if (!granted && capability == FollowUpOptionalCapability.ACCESSIBILITY) {
+                        Text(
+                            "בהגדרות שייפתחו: בחר/י 'FollowUp — שליחה אוטומטית' והפעל/י.",
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = AccessibilityColors.TextFaint
                         )
                     }
                 }
@@ -3617,60 +3827,8 @@ private fun SystemSettingsScreen(
             }
         }
 
-        // Timing of the follow-up suggestion. This is upkeep rather than a journey decision — the
-        // journey decides *what* to send and to whom; this decides how often the app is allowed to
-        // ask. Both brakes can be switched off entirely: a user who wants a suggestion after every
-        // call is choosing more noise on purpose, and the suggestion is silent either way.
-        AppCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                SettingsSectionTitle("תזמון ההצעות", bottomPadding = 4)
-
-                Text(
-                    "כל כמה זמן להציע שוב על אותו מספר",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AccessibilityColors.TextStrong
-                )
-                FollowUpCooldownOptions.sameNumber.forEach { choice ->
-                    RadioRow(
-                        label = choice.label,
-                        selected = sameNumberCooldown == choice.millis,
-                        onClick = {
-                            sameNumberCooldown = choice.millis
-                            cooldownSettings.sameNumberCooldownMillis = choice.millis
-                        }
-                    )
-                }
-
-                Text(
-                    "מרווח מינימלי בין הצעות",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AccessibilityColors.TextStrong,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-                FollowUpCooldownOptions.globalQuiet.forEach { choice ->
-                    RadioRow(
-                        label = choice.label,
-                        selected = globalQuiet == choice.millis,
-                        onClick = {
-                            globalQuiet = choice.millis
-                            cooldownSettings.globalQuietMillis = choice.millis
-                        }
-                    )
-                }
-
-                if (sameNumberCooldown == null && globalQuiet == null) {
-                    Text(
-                        "כל שיחה תייצר הצעה — כולל טעויות חיוג ומוקדים.",
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        color = AccessibilityColors.TextFaint,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
-                }
-            }
-        }
+        // "תזמון ההצעות" moved to the moment edit page (next to the related frequency toggle), per the
+        // user — the timing controls now live where the message and audience are decided.
 
         AppCard(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -4121,6 +4279,24 @@ private fun ContactCardPreview(card: ContactCard) {
     }
 }
 
+/** Compact inline "אפשר"/"הפעל" action on an ungranted permission row. */
+@Composable
+private fun PermissionRowAction(text: String, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = AccessibilityColors.Primary,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+        )
+    }
+}
+
 @Composable
 private fun DiagnosticRow(label: String, value: String) {
     Row(
@@ -4141,6 +4317,23 @@ private fun DiagnosticRow(label: String, value: String) {
 
 private fun Context.hasPermission(permission: String): Boolean =
     checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+/** The Android runtime permission string behind a [FollowUpPermission] row. */
+private fun androidPermissionFor(permission: FollowUpPermission): String = when (permission) {
+    FollowUpPermission.PHONE_STATE -> Manifest.permission.READ_PHONE_STATE
+    FollowUpPermission.CALL_LOG -> Manifest.permission.READ_CALL_LOG
+    FollowUpPermission.CONTACTS -> Manifest.permission.READ_CONTACTS
+}
+
+/**
+ * Opens the OS accessibility list so the user can enable our service. The service state is re-read
+ * on ON_RESUME when the user returns, so the row/chip update without any extra plumbing.
+ */
+private fun Context.openAccessibilitySettings() {
+    val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    startActivity(intent)
+}
 
 private fun applyCallDetectionServiceState(
     context: Context,

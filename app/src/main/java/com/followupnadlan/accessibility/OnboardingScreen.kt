@@ -213,6 +213,14 @@ private fun OnboardingPermissionsSlide() {
         OnboardingPermBox(emoji = "📞", title = "זיהוי שיחות נכנסות", description = "כדי לדעת מתי שיחה לא נענתה או הסתיימה.")
         Spacer(modifier = Modifier.height(12.dp))
         OnboardingPermBox(emoji = "💬", title = "שליחת הודעות", description = "כדי לשלוח את הודעת ההמשך בשמך.")
+        Spacer(modifier = Modifier.height(12.dp))
+        // Explanatory only — no live toggle. The Accessibility grant is OPTIONAL and only enables
+        // automatic sending on missed calls; the actual grant happens later (Settings / missed edit).
+        OnboardingPermBox(
+            emoji = "⚡",
+            title = "שליחה אוטומטית (לא חובה)",
+            description = "בשיחות שלא ענית, האפליקציה יכולה לשלוח את ההודעה לבד — בלי שתצטרך לגעת בטלפון. לשם כך צריך להפעיל הרשאת 'נגישות' פעם אחת בהגדרות. אפשר גם בלי זה, ואז תאשר כל הודעה בעצמך."
+        )
     }
 }
 
