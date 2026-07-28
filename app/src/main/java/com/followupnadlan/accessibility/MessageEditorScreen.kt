@@ -140,11 +140,9 @@ internal fun MessageEditorScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             ContactTextCardBubble(raw = cardText)
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(if (isEnded) "11:05" else "10:42", fontSize = 10.sp, color = androidx.compose.ui.graphics.Color(0xFF667781))
-                            Text("✓✓", fontSize = 10.sp, color = AccessibilityColors.WaCheck)
-                        }
+                        // No fabricated timestamp / read-receipt: the app has no WhatsApp receipt
+                        // access, so a blue ✓✓ + made-up clock time would falsely read as
+                        // "delivered & read" (§2 — honesty over chrome).
                     }
                 }
             }
@@ -167,23 +165,17 @@ internal fun MessageEditorScreen(
                 if (showCardToggle) {
                     AppCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 24) {
                         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                            if (isEnded) {
-                                EditorToggleRow(
-                                    emoji = "📇",
-                                    title = "לצרף כרטיס ביקור (vCard)",
-                                    description = "שולח איש קשר לשמירה מהירה בטלפון",
-                                    checked = cardAttached,
-                                    onToggle = onToggleCardAttached
-                                )
-                            } else {
-                                EditorToggleRow(
-                                    emoji = "📇",
-                                    title = "כרטיס ביקור (vCard)",
-                                    description = "מצרף איש קשר לשמירה מהירה",
-                                    checked = cardAttached,
-                                    onToggle = onToggleCardAttached
-                                )
-                            }
+                            // Honest wording, matching the moment-edit "צירוף כרטיס ביקור" toggle
+                            // (AccessibilityApp.kt): a formatted TEXT business card added to the
+                            // message — NOT a .vcf file (WhatsApp blocks file-share to unsaved
+                            // numbers), so no "(vCard)" and no "saves a contact" promise (§2).
+                            EditorToggleRow(
+                                emoji = "📇",
+                                title = "צירוף כרטיס ביקור",
+                                description = "הוסף כרטיס איש קשר לשמירה מהירה אצל הלקוח",
+                                checked = cardAttached,
+                                onToggle = onToggleCardAttached
+                            )
                         }
                     }
                 }

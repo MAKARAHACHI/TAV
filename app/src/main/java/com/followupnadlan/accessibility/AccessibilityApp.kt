@@ -975,7 +975,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             kind = MomentEditKind.MISSED,
                             isEnabled = missedMomentEnabled,
                             signature = signaturePreview,
-                            time = "10:42",
                             activeBody = missedTemplate?.let { if (missedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -1014,7 +1013,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             kind = MomentEditKind.ENDED,
                             isEnabled = endedMomentEnabled,
                             signature = signaturePreview,
-                            time = "11:05",
                             activeBody = endedTemplate?.let { if (endedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -1053,7 +1051,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             kind = MomentEditKind.NO_ANSWER,
                             isEnabled = noAnswerMomentEnabled,
                             signature = signaturePreview,
-                            time = "12:30",
                             activeBody = noAnswerTemplate?.let { if (noAnswerCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -1432,7 +1429,6 @@ private fun MomentEditScreen(
     kind: MomentEditKind,
     isEnabled: Boolean,
     signature: String,
-    time: String,
     activeBody: String,
     channelLabel: String,
     availableChannels: List<FollowUpChannel>,
@@ -1489,7 +1485,7 @@ private fun MomentEditScreen(
         }
 
         // HERO — live preview card (chat-bg), tag row + channel name, then the WhatsApp bubble
-        // carrying the ACTIVE template text + bold signature + meta (time + static ✓✓).
+        // carrying the ACTIVE template text + bold signature. No fabricated time / ✓✓ read-receipt.
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = Color(0xFFEFEAE2),
@@ -1537,11 +1533,9 @@ private fun MomentEditScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             ContactTextCardBubble(raw = cardText)
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(time, fontSize = 10.sp, color = Color(0xFF667781))
-                            Text("✓✓", fontSize = 10.sp, color = Color(0xFF53BDEB))
-                        }
+                        // No fabricated timestamp / read-receipt (§2) — see FollowUp honesty note:
+                        // the app has no WhatsApp receipt access, so a blue ✓✓ would falsely read
+                        // as "delivered & read".
                     }
                 }
             }
@@ -2061,7 +2055,6 @@ private fun HomeScreen(
             title = "אם לא עניתי",
             body = missedBody,
             signature = signature,
-            time = "10:42",
             // §2: reflects real capability — "נשלח אוטומטי" only when automatic AND Accessibility on.
             sendMode = missedSendMode,
             enabled = missedEnabled,
@@ -2082,7 +2075,6 @@ private fun HomeScreen(
             // ended card is ON, the accordion body's cardShown guard suppresses the standalone
             // signature (card replaces it) — preview stays == sent either way.
             signature = signature,
-            time = "11:05",
             // Ended never auto-sends.
             sendMode = MissedSendModeLabel.MANUAL,
             enabled = endedEnabled,
@@ -2099,7 +2091,6 @@ private fun HomeScreen(
             title = "לא ענו לי",
             body = noAnswerBody,
             signature = signature,
-            time = "12:30",
             // No-answer never auto-sends.
             sendMode = MissedSendModeLabel.MANUAL,
             enabled = noAnswerEnabled,
@@ -2361,7 +2352,6 @@ private fun HomeAccordionCard(
     title: String,
     body: String,
     signature: String,
-    time: String,
     sendMode: String,
     enabled: Boolean,
     active: Boolean,
@@ -2501,12 +2491,9 @@ private fun HomeAccordionCard(
                                 ContactTextCardBubble(raw = it.text)
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
-                            // meta: timestamp + static ✓✓ (#53bdeb) — no WhatsApp receipt access.
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(time, fontSize = 10.sp, color = Color(0xFF667781))
-                                Text("✓✓", fontSize = 10.sp, color = Color(0xFF53BDEB))
-                            }
+                            // No fabricated timestamp / read-receipt (§2): the app has no WhatsApp
+                            // receipt access, so a blue ✓✓ + made-up time would falsely read as
+                            // "delivered & read".
                         }
                     }
 
@@ -3196,7 +3183,9 @@ private fun MissedCallPromptScreen(
                                         ContactTextCardBubble(raw = cardText)
                                     }
                                 }
-                                // Meta: timestamp + static double-check.
+                                // Meta: the REAL call time only. No ✓✓ read-receipt — the app has
+                                // no WhatsApp receipt access, so a blue ✓✓ would falsely read as
+                                // "delivered & read" (§2).
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -3205,8 +3194,6 @@ private fun MissedCallPromptScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(metaTime, fontSize = 10.sp, color = AccessibilityColors.TextMuted)
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("✓✓", fontSize = 10.sp, color = PromptCheckBlue)
                                 }
                             }
                         }

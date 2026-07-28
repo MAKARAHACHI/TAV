@@ -44,7 +44,8 @@ private enum class HistoryTab { ALL, MISSED }
  * "יומן פעילות" (history.html): segmented tabs, date-grouped activity cards. Reuses the
  * existing FollowUpLogStore as its data source — no new storage, the log entries already
  * written on every send/skip are the minimal DB the design calls for.
- * ✓✓ delivery ticks are drawn static (WhatsApp gives the app no read-receipt access).
+ * No ✓✓ read-receipt is shown — WhatsApp gives the app no receipt access, so it would falsely
+ * read as "delivered & read" (§2).
  */
 @Composable
 internal fun HistoryScreen(logStore: FollowUpLogStore, onBack: () -> Unit) {
@@ -248,8 +249,8 @@ private fun HistoryActivityCard(row: HistoryRow) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(row.summary, fontSize = 13.sp, color = AccessibilityColors.TextStrong)
-                    // ✓✓ static — WhatsApp gives no read-receipt access; see plan v2 §"3 not-wired".
-                    Text("✓✓", fontSize = 13.sp, color = AccessibilityColors.WaCheck, fontWeight = FontWeight.Bold)
+                    // No ✓✓ read-receipt: the app has no WhatsApp receipt access, so a blue ✓✓
+                    // would falsely read as "delivered & read" (§2 — honesty over chrome).
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

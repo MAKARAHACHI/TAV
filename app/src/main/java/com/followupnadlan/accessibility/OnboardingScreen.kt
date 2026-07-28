@@ -55,15 +55,33 @@ internal fun OnboardingScreen(
     val profile = remember { myDetailsStore.load() }
     var name by remember { mutableStateOf(profile.agentName) }
     var role by remember { mutableStateOf(profile.officeName) }
+    var phone by remember { mutableStateOf(profile.phone) }
+
+    // §2: slide 4 must reflect the ACTUAL permission result, not assume success. Derived from the
+    // launcher's own result map (same two call-detection permissions Home's warning checks).
+    var permissionOutcome by remember { mutableStateOf(OnboardingPermissionOutcome.MISSING) }
 
     val callPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) {
+    ) { grants ->
+        permissionOutcome = OnboardingPermissionLogic.outcomeFor(
+            phoneStateGranted = grants[Manifest.permission.READ_PHONE_STATE] == true,
+            callLogGranted = grants[Manifest.permission.READ_CALL_LOG] == true
+        )
         onRequestCallPermissions()
+        slide = 4
+    }
+
+    fun requestCallPermissions() {
+        callPermissionLauncher.launch(
+            arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG)
+        )
     }
 
     fun finish() {
-        myDetailsStore.save(profile.copy(agentName = name.trim(), officeName = role.trim()))
+        myDetailsStore.save(
+            profile.copy(agentName = name.trim(), officeName = role.trim(), phone = phone.trim())
+        )
         setupPreferences.setSetupCompleted(true)
         onFinish()
     }
@@ -74,9 +92,16 @@ internal fun OnboardingScreen(
         Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp)) {
             when (slide) {
                 1 -> OnboardingWelcomeSlide()
-                2 -> OnboardingDetailsSlide(name = name, onNameChange = { name = it }, role = role, onRoleChange = { role = it })
+                2 -> OnboardingDetailsSlide(
+                    name = name,
+                    onNameChange = { name = it },
+                    role = role,
+                    onRoleChange = { role = it },
+                    phone = phone,
+                    onPhoneChange = { phone = it }
+                )
                 3 -> OnboardingPermissionsSlide()
-                else -> OnboardingAllSetSlide()
+                else -> OnboardingAllSetSlide(outcome = permissionOutcome, onGrantPermissions = ::requestCallPermissions)
             }
         }
 
@@ -92,7 +117,8 @@ internal fun OnboardingScreen(
             val (label, background) = when (slide) {
                 2 -> "המשך לשלב הבא" to AccessibilityColors.Primary
                 3 -> "אשר גישה (חובה)" to AccessibilityColors.Heading
-                4 -> "התחל לעבוד" to AccessibilityColors.Primary
+                // §2: don't say "start working" when the service can't run — offer honest "continue anyway".
+                4 -> (if (permissionOutcome == OnboardingPermissionOutcome.READY) "התחל לעבוד" else "המשך בכל זאת") to AccessibilityColors.Primary
                 else -> "המשך" to AccessibilityColors.Primary
             }
             PillButton(
@@ -100,12 +126,9 @@ internal fun OnboardingScreen(
                 background = background,
                 onClick = {
                     when (slide) {
-                        3 -> {
-                            callPermissionLauncher.launch(
-                                arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG)
-                            )
-                            slide = 4
-                        }
+                        // The launcher callback advances to slide 4 with the REAL outcome (§2) —
+                        // this button only fires the request; it never assumes success.
+                        3 -> requestCallPermissions()
                         4 -> finish()
                         else -> slide += 1
                     }
@@ -118,7 +141,9 @@ internal fun OnboardingScreen(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = AccessibilityColors.TextMuted,
-                    modifier = Modifier.clickable { slide = 4 }
+                    // Skipping leaves the permissions ungranted ⇒ slide 4 shows the honest
+                    // "missing" state, not a false "all set".
+                    modifier = Modifier.clickable { permissionOutcome = OnboardingPermissionOutcome.MISSING; slide = 4 }
                 )
             }
         }
@@ -152,7 +177,14 @@ private fun OnboardingWelcomeSlide() {
 }
 
 @Composable
-private fun OnboardingDetailsSlide(name: String, onNameChange: (String) -> Unit, role: String, onRoleChange: (String) -> Unit) {
+private fun OnboardingDetailsSlide(
+    name: String,
+    onNameChange: (String) -> Unit,
+    role: String,
+    onRoleChange: (String) -> Unit,
+    phone: String,
+    onPhoneChange: (String) -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Text("📝", fontSize = 48.sp)
@@ -173,6 +205,11 @@ private fun OnboardingDetailsSlide(name: String, onNameChange: (String) -> Unit,
         OnboardingLabeledField(label = "איך קוראים לך?", value = name, placeholder = "לדוגמה: דני לוי", onChange = onNameChange)
         Spacer(modifier = Modifier.height(16.dp))
         OnboardingLabeledField(label = "מה התפקיד או העסק שלך?", value = role, placeholder = "לדוגמה: עו״ד מקרקעין", onChange = onRoleChange)
+        Spacer(modifier = Modifier.height(16.dp))
+        // Phone powers the card's headline "save me to contacts" block (ContactTextCard) — without
+        // it that block is dropped, so the feature is dead from install until the profile editor is
+        // found. Empty editable field (no extra permission just to prefill).
+        OnboardingLabeledField(label = "מה מספר הטלפון שלך?", value = phone, placeholder = "לדוגמה: 050-1234567", onChange = onPhoneChange)
     }
 }
 
@@ -249,21 +286,47 @@ private fun OnboardingPermBox(emoji: String, title: String, description: String)
 }
 
 @Composable
-private fun OnboardingAllSetSlide() {
+private fun OnboardingAllSetSlide(
+    outcome: OnboardingPermissionOutcome,
+    onGrantPermissions: () -> Unit
+) {
+    val ready = outcome == OnboardingPermissionOutcome.READY
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text("🎉", fontSize = 72.sp)
+            Text(if (ready) "🎉" else "⚠️", fontSize = 72.sp)
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 40.dp)) {
-            Text("הכל מוכן!", fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = AccessibilityColors.Heading)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "המערכת מוגדרת ועובדת ברקע.\nאתה יכול להמשיך בשגרת היום שלך, אנחנו נדאג ללקוחות שמתקשרים.",
-                fontSize = 15.sp,
-                lineHeight = 22.sp,
-                textAlign = TextAlign.Center,
-                color = AccessibilityColors.TextMuted
-            )
+            // §2: the screen tells the truth about the actual permission result — no celebration
+            // when the service cannot run.
+            if (ready) {
+                Text("הכל מוכן!", fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = AccessibilityColors.Heading)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "המערכת מוגדרת ועובדת ברקע.\nאתה יכול להמשיך בשגרת היום שלך, אנחנו נדאג ללקוחות שמתקשרים.",
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    textAlign = TextAlign.Center,
+                    color = AccessibilityColors.TextMuted
+                )
+            } else {
+                Text("חסרה הרשאה", fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = AccessibilityColors.Heading)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "בלי ההרשאה לזהות שיחות, לא נוכל לענות ללקוחות שמתקשרים.\nהפעל/י כדי שנוכל לעבוד.",
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    textAlign = TextAlign.Center,
+                    color = AccessibilityColors.TextMuted
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "הפעל/י הרשאה",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccessibilityColors.Primary,
+                    modifier = Modifier.clickable(onClick = onGrantPermissions)
+                )
+            }
         }
     }
 }
