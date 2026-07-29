@@ -1098,9 +1098,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     }
                 }
 
-                // Tapping the card in the ended preview edits its three fields in place. This is a
-                // dedicated editor rather than the older ContactCardScreen, whose copy is about
-                // sharing a vCard — a flow MVP-1 does not use.
+                // Tapping the card in the ended preview edits its three fields in place, via the
+                // dedicated SignatureCardEditorScreen.
                 if (cardEditorOpen) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
