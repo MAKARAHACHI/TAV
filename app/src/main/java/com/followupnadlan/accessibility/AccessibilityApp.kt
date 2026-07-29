@@ -2383,13 +2383,19 @@ private fun MissedCallPromptScreen(
     // Built once from the profile; the SAME string is both previewed (styled) and sent (plain),
     // so preview == sent (§2). Empty when the profile has no name — then no card anywhere.
     val cardText = ContactTextCard.build(card)
-    val showCard = cardAttached && cardText.isNotBlank()
+    // Whether a card is even possible for this profile — drives whether the per-send toggle chip
+    // shows at all. A nameless profile can never have a card, toggle or not.
+    val cardAvailable = cardText.isNotBlank()
+    // PER-SEND toggle (Wave E): seeded from the moment's saved setting, but flipping it here never
+    // writes back to missedCardSettings/endedCardSettings/noAnswerCardSettings — it only changes
+    // THIS outgoing message, same one-off lifetime as `draft` below.
+    var cardOn by remember { mutableStateOf(cardAttached && cardAvailable) }
     // The active variant body drives the artifact. The message passed from the notification wins
     // when present (it is the exact text that was prepared); otherwise fall back to the active
     // variant. When the card is on it OWNS the website line, so the template's own link lines are
     // suppressed (raw body) to avoid showing the website twice.
     val fallbackBody = defaultTemplate?.let {
-        if (showCard) it.body.trim() else MessageComposition.build(it)
+        if (cardOn) it.body.trim() else MessageComposition.build(it)
     }.orEmpty()
     // Normalise the incoming message to the PURE body: any text card and any one-line signature
     // already baked in are stripped here, so the sheet is the single owner that re-appends them
@@ -2423,7 +2429,7 @@ private fun MissedCallPromptScreen(
     // card is attached it REPLACES the one-line signature (name/role/phone live in the card), so
     // only the body + text card are sent. When the card is off, the one-line signature closes the
     // body as before. Preview == sent for every moment.
-    val outgoingMessage = if (showCard) {
+    val outgoingMessage = if (cardOn) {
         ContactTextCard.append(resolvedMessage, card)
     } else {
         SignatureLine.append(resolvedMessage, card)
@@ -2532,7 +2538,7 @@ private fun MissedCallPromptScreen(
                                     )
                                     // Card ON ⇒ the card replaces the one-line signature, so the
                                     // standalone signature is not drawn (preview == sent).
-                                    if (!showCard && signature.isNotBlank()) {
+                                    if (!cardOn && signature.isNotBlank()) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         Text(
                                             text = signature,
@@ -2542,7 +2548,7 @@ private fun MissedCallPromptScreen(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
-                                    if (showCard) {
+                                    if (cardOn) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         ContactTextCardBubble(raw = cardText)
                                     }
@@ -2578,7 +2584,7 @@ private fun MissedCallPromptScreen(
                                     // card is ON it OWNS the website line, so use the raw template
                                     // body (no link lines) — otherwise picking a variant would print
                                     // the website twice (body link + card). Card OFF ⇒ unchanged.
-                                    val body = if (showCard) variant.body.trim() else MessageComposition.build(variant)
+                                    val body = if (cardOn) variant.body.trim() else MessageComposition.build(variant)
                                     val selected = body == draft
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
@@ -2606,12 +2612,37 @@ private fun MissedCallPromptScreen(
                         }
 
                         // Discreet edit link — nothing editable is visible until it is tapped.
+                        // The per-send card chip (Wave E) sits alongside it: it only changes THIS
+                        // outgoing message (never the moment's saved "צירוף כרטיס ביקור" setting) and
+                        // is hidden entirely when the profile has no card to attach.
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.End
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            if (cardAvailable) {
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = AccessibilityColors.Surface,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, AccessibilityColors.CardBorder),
+                                    modifier = Modifier
+                                        .clickable(
+                                            onClickLabel = if (cardOn) "הסר כרטיס ביקור מההודעה הזו" else "הוסף כרטיס ביקור להודעה הזו"
+                                        ) { cardOn = !cardOn }
+                                ) {
+                                    Text(
+                                        text = if (cardOn) "הסר כרטיס" else "הוסף כרטיס",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccessibilityColors.TextBody,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                    )
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.width(1.dp))
+                            }
                             Text(
                                 text = if (editing) "ביטול עריכה" else "ערוך הודעה",
                                 fontSize = 14.sp,
