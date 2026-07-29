@@ -295,13 +295,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     // Which message variant the editor is open for (Part B). null = closed. Carries the role (for
     // wording/tags) and the specific variant id being edited — new variants get a blank id.
     var messageEditorTarget by remember { mutableStateOf<MessageEditorTarget?>(null) }
-    // Wiring Pass: journey-screen picker overlays (missed journey) and the ended journey's
-    // in-page contact-card editor.
-    var recipientPickerOpen by remember { mutableStateOf(false) }
-    var askPickerOpen by remember { mutableStateOf(false) }
+    // The ended journey's in-page contact-card editor.
     var cardEditorOpen by remember { mutableStateOf(false) }
-    var channelPickerOpen by remember { mutableStateOf(false) }
-    var endedScopePickerOpen by remember { mutableStateOf(false) }
     // Bumped after the contact card is edited from the ended journey so the preview reloads.
     var profileRefresh by remember { mutableStateOf(0) }
     // Bumped whenever a recipient store is mutated, so Settings previews recompute.
@@ -325,8 +320,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var sameNumberCooldown by remember { mutableStateOf(cooldownSettings.sameNumberCooldownMillis) }
     var globalQuiet by remember { mutableStateOf(cooldownSettings.globalQuietMillis) }
     var recipientScope by remember { mutableStateOf(recipientScopeSettings.scope) }
-    // The ended moment's own scope — a separate decision from missed (different jobs, §4).
-    var endedScope by remember { mutableStateOf(endedScopeSettings.scope) }
     // Override-on-default model. The general default (Smart-Rules) that every moment falls back to
     // while it stays on "כמו הכללי", plus each moment's per-moment override (null = follow general).
     var generalScope by remember { mutableStateOf(generalScopeSettings.scope) }
@@ -615,18 +608,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     }
 
     // Hardware/gesture Back pops the in-app screen stack instead of exiting the app. Topmost
-    // overlay first: dialog pickers → card editor → message editor → full-screen picker → modal →
-    // non-Home tab. Only enabled while something is open; at the Home root it stays disabled so the
+    // overlay first: card editor → message editor → full-screen picker → modal → non-Home tab.
+    // Only enabled while something is open; at the Home root it stays disabled so the
     // system default (leave the app) applies. Mirrors the onBack each screen already wires.
-    val hasBackStack = recipientPickerOpen || askPickerOpen || channelPickerOpen ||
-        endedScopePickerOpen || cardEditorOpen || messageEditorTarget != null ||
+    val hasBackStack = cardEditorOpen || messageEditorTarget != null ||
         activePicker != null || modal != AccessibilityModal.NONE || tab != AccessibilityTab.HOME
     BackHandler(enabled = hasBackStack) {
         when {
-            recipientPickerOpen -> recipientPickerOpen = false
-            askPickerOpen -> askPickerOpen = false
-            channelPickerOpen -> channelPickerOpen = false
-            endedScopePickerOpen -> endedScopePickerOpen = false
             cardEditorOpen -> { cardEditorOpen = false; profileRefresh++ }
             messageEditorTarget != null -> messageEditorTarget = null
             activePicker != null -> activePicker = null
@@ -1110,98 +1098,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                     }
                 }
 
-                // Wiring Pass: "מי יקבל את ההודעה?" — the 4-state recipient scope. Every state is
-                // honored by the engine's decide() (ANY_NUMBER / CONTACTS_ONLY / NON_CONTACTS_ONLY /
-                // ONLY_SELECTED), so exposing all four opens no §2 gap.
-                if (recipientPickerOpen) {
-                    JourneyOptionPickerDialog(
-                        title = "מי יקבל את ההודעה?",
-                        options = RecipientScope.entries.map { it to recipientScopeLabel(it) },
-                        selected = recipientScope,
-                        onSelect = { scope ->
-                            recipientScope = scope
-                            recipientScopeSettings.scope = scope
-                            recipientPickerOpen = false
-                            // "רק אנשים שאבחר" is meaningless until a list exists, so choosing it
-                            // goes straight to building that list rather than silently matching no one.
-                            if (scope == RecipientScope.ONLY_SELECTED) {
-                                modal = AccessibilityModal.ALLOWED_RECIPIENTS
-                            }
-                        },
-                        onDismiss = { recipientPickerOpen = false }
-                    )
-                }
-
-                // "באיזה ערוץ?" — WhatsApp Business is offered only when installed, and each
-                // choice is stored with fallback OFF, so the picked channel is the one used (§2).
-                if (channelPickerOpen) {
-                    JourneyOptionPickerDialog(
-                        title = "באיזה ערוץ?",
-                        options = FollowUpChannelSettings
-                            .available(whatsappAvailability.businessInstalled)
-                            .map { it to channelLabel(it) },
-                        selected = selectedChannel,
-                        onSelect = { channel ->
-                            selectedChannel = channel
-                            FollowUpChannelSettings.apply(settings, channel)
-                            smsFallback = settings.smsFallbackEnabled
-                            preferredWhatsApp = if (channel == FollowUpChannel.WHATSAPP_BUSINESS) {
-                                WhatsAppChoice.BUSINESS
-                            } else {
-                                WhatsAppChoice.REGULAR
-                            }
-                            channelPickerOpen = false
-                        },
-                        onDismiss = { channelPickerOpen = false }
-                    )
-                }
-
-                // "אחרי אילו שיחות להציע לשלוח?" — the ended moment's own scope, stored separately.
-                if (endedScopePickerOpen) {
-                    JourneyOptionPickerDialog(
-                        title = "אחרי אילו שיחות להציע לשלוח?",
-                        options = RecipientScope.entries.map { it to endedScopeLabel(it) },
-                        selected = endedScope,
-                        onSelect = { scope ->
-                            endedScope = scope
-                            endedScopeSettings.scope = scope
-                            endedScopePickerOpen = false
-                            if (scope == RecipientScope.ONLY_SELECTED) {
-                                modal = AccessibilityModal.ALLOWED_RECIPIENTS
-                            }
-                        },
-                        onDismiss = { endedScopePickerOpen = false }
-                    )
-                }
-
-                // Wiring Pass: "האם לאשר לפני שליחה?" — maps to whatsappMode (PREPARED_MANUAL = ask,
-                // ACCESSIBILITY_AUTO = don't). Same mapping the Settings screen already persists.
-                if (askPickerOpen) {
-                    JourneyOptionPickerDialog(
-                        title = "האם לאשר לפני שליחה?",
-                        options = listOf(
-                            true to "כן, אאשר כל הודעה",
-                            false to "לא, תישלח גם בלי אישורי"
-                        ),
-                        selected = askBeforeSend,
-                        onSelect = { ask ->
-                            askBeforeSend = ask
-                            settings.whatsappMode = if (ask) {
-                                MissedCallWhatsAppMode.PREPARED_MANUAL
-                            } else {
-                                MissedCallWhatsAppMode.ACCESSIBILITY_AUTO
-                            }
-                            // §2: choosing "תישלח גם בלי אישורי" *is* the request to send without
-                            // asking. The engine gates auto-send on this second flag as well, so
-                            // leaving it false would show the user a promise the engine ignores —
-                            // it would quietly open the chat and wait instead.
-                            settings.whatsappAutomationEnabled = !ask
-                            askPickerOpen = false
-                        },
-                        onDismiss = { askPickerOpen = false }
-                    )
-                }
-
                 // Tapping the card in the ended preview edits its three fields in place. This is a
                 // dedicated editor rather than the older ContactCardScreen, whose copy is about
                 // sharing a vCard — a flow MVP-1 does not use.
@@ -1235,39 +1131,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
 }
 
 enum class WhatsAppChoice { REGULAR, BUSINESS }
-
-// Wiring Pass: a minimal single-choice picker used by the journey rows (recipient scope, ask-
-// before-send). Options are (value, label) pairs; picking one calls onSelect and closes. Design is
-// intentionally throwaway — the UI is scheduled to be re-skinned; this just makes the choice work.
-@Composable
-private fun <T> JourneyOptionPickerDialog(
-    title: String,
-    options: List<Pair<T, String>>,
-    selected: T,
-    onSelect: (T) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.Bold, color = AccessibilityColors.Heading) },
-        text = {
-            Column {
-                options.forEach { (value, label) ->
-                    RadioRow(
-                        label = label,
-                        selected = value == selected,
-                        onClick = { onSelect(value) }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("סגור", color = AccessibilityColors.Primary)
-            }
-        }
-    )
-}
 
 // ===================== MOMENT EDIT SCREEN (edit-scenario-fixed.html) =====================
 /**
@@ -3568,15 +3431,6 @@ private fun NavigationRowContent(label: String, leadingIcon: ImageVector, leadin
 private fun recipientScopeLabel(scope: RecipientScope): String =
     when (scope) {
         RecipientScope.ANY_NUMBER -> "לכל מי שמתקשר"
-        RecipientScope.CONTACTS_ONLY -> "רק אנשי הקשר שלי"
-        RecipientScope.NON_CONTACTS_ONLY -> "רק מי שלא שמור אצלי"
-        RecipientScope.ONLY_SELECTED -> "רק אנשים שאבחר"
-    }
-
-/** The same four choices phrased for the ended moment, which offers rather than sends. */
-private fun endedScopeLabel(scope: RecipientScope): String =
-    when (scope) {
-        RecipientScope.ANY_NUMBER -> "אחרי כל שיחה"
         RecipientScope.CONTACTS_ONLY -> "רק אנשי הקשר שלי"
         RecipientScope.NON_CONTACTS_ONLY -> "רק מי שלא שמור אצלי"
         RecipientScope.ONLY_SELECTED -> "רק אנשים שאבחר"
