@@ -332,6 +332,18 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var missedCardAttached by remember { mutableStateOf(missedCardSettings.cardAttached) }
     var endedCardAttached by remember { mutableStateOf(endedCardSettings.cardAttached) }
     var noAnswerCardAttached by remember { mutableStateOf(noAnswerCardSettings.cardAttached) }
+    // Per-moment cooldown OVERRIDES (override-on-default). Each moment's two brakes are 3-state:
+    // Inherit ("לפי הכללי") / Off ("בלי המתנה") / Value. One store per moment; the general default
+    // lives in cooldownSettings above. Untouched = Inherit, so nothing changes until overridden.
+    val missedCooldownOverride = remember(context) { MomentCooldownOverrideSettings.forMoment(appContext, MomentEditKind.MISSED) }
+    val endedCooldownOverride = remember(context) { MomentCooldownOverrideSettings.forMoment(appContext, MomentEditKind.ENDED) }
+    val noAnswerCooldownOverride = remember(context) { MomentCooldownOverrideSettings.forMoment(appContext, MomentEditKind.NO_ANSWER) }
+    var missedSameNumberChoice by remember { mutableStateOf(missedCooldownOverride.sameNumberOverride) }
+    var missedGlobalQuietChoice by remember { mutableStateOf(missedCooldownOverride.globalQuietOverride) }
+    var endedSameNumberChoice by remember { mutableStateOf(endedCooldownOverride.sameNumberOverride) }
+    var endedGlobalQuietChoice by remember { mutableStateOf(endedCooldownOverride.globalQuietOverride) }
+    var noAnswerSameNumberChoice by remember { mutableStateOf(noAnswerCooldownOverride.sameNumberOverride) }
+    var noAnswerGlobalQuietChoice by remember { mutableStateOf(noAnswerCooldownOverride.globalQuietOverride) }
     // The single explicit channel choice, read back from the engine's flag pair.
     var selectedChannel by remember { mutableStateOf(FollowUpChannelSettings.current(settings)) }
     var smsFallback by remember { mutableStateOf(settings.smsFallbackEnabled) }
@@ -455,20 +467,18 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
         askBeforeSend = mode == MomentApprovalMode.MANUAL
     }
 
-    // Moment-edit handler: pick a same-number cooldown interval (or OFF). Writes the SAME global
-    // brake the old Settings card wrote (sameNumberCooldownMillis) AND mirrors into the missed path's
-    // settings.cooldownMillis, exactly as the old 24h toggle did — the send engine is unchanged; only
-    // the control's location and granularity moved.
-    fun onSelectSameNumberCooldown(millis: Long?) {
+    // Smart-Rules handler: pick the GENERAL same-number cooldown default (or OFF). This is the single
+    // fallback every moment inherits while it stays on "לפי הכללי" (override-on-default). Writes only
+    // the general store; the missed/ended/no-answer engines resolve it per-moment at decision time via
+    // EffectiveCooldown.resolve. No per-moment store is touched here.
+    fun onSelectGeneralSameNumberCooldown(millis: Long?) {
         sameNumberCooldown = millis
         cooldownSettings.sameNumberCooldownMillis = millis
-        // settings.cooldownMillis floors at 60s and can't be truly zero; 0L is the closest to "off".
-        settings.cooldownMillis = millis ?: 0L
     }
 
-    // Moment-edit handler: pick the global minimum interval between any two messages (or OFF). Writes
-    // the same global brake the old Settings card wrote (globalQuietMillis). Engine unchanged.
-    fun onSelectGlobalQuiet(millis: Long?) {
+    // Smart-Rules handler: pick the GENERAL minimum interval between any two messages (or OFF). The
+    // general default for the anti-burst brake; each moment inherits or overrides it. Engine unchanged.
+    fun onSelectGeneralGlobalQuiet(millis: Long?) {
         globalQuiet = millis
         cooldownSettings.globalQuietMillis = millis
     }
@@ -521,6 +531,25 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                 noAnswerCardAttached = !noAnswerCardAttached
                 noAnswerCardSettings.cardAttached = noAnswerCardAttached
             }
+        }
+    }
+
+    // Per-moment cooldown-override handlers (override-on-default). Each writes ONLY its own moment's
+    // override store — never the general default, never another moment. Inherit ("לפי הכללי") drops
+    // the stored key; Off/Value pin an override. The engine resolves these at decision time.
+    fun onMomentSelectSameNumberCooldown(kind: MomentEditKind, choice: CooldownChoice) {
+        when (kind) {
+            MomentEditKind.MISSED -> { missedSameNumberChoice = choice; missedCooldownOverride.sameNumberOverride = choice }
+            MomentEditKind.ENDED -> { endedSameNumberChoice = choice; endedCooldownOverride.sameNumberOverride = choice }
+            MomentEditKind.NO_ANSWER -> { noAnswerSameNumberChoice = choice; noAnswerCooldownOverride.sameNumberOverride = choice }
+        }
+    }
+
+    fun onMomentSelectGlobalQuiet(kind: MomentEditKind, choice: CooldownChoice) {
+        when (kind) {
+            MomentEditKind.MISSED -> { missedGlobalQuietChoice = choice; missedCooldownOverride.globalQuietOverride = choice }
+            MomentEditKind.ENDED -> { endedGlobalQuietChoice = choice; endedCooldownOverride.globalQuietOverride = choice }
+            MomentEditKind.NO_ANSWER -> { noAnswerGlobalQuietChoice = choice; noAnswerCooldownOverride.globalQuietOverride = choice }
         }
     }
 
@@ -857,8 +886,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             accessibilityEnabled = accessibilityEnabled,
-                            sameNumberCooldown = sameNumberCooldown,
-                            globalQuiet = globalQuiet,
+                            generalSameNumberCooldown = sameNumberCooldown,
+                            generalGlobalQuiet = globalQuiet,
+                            sameNumberChoice = missedSameNumberChoice,
+                            globalQuietChoice = missedGlobalQuietChoice,
                             scopeOverride = missedScopeOverride,
                             cardAttached = missedCardAttached,
                             cardText = ContactTextCard.build(myDetailsStore.load()),
@@ -871,8 +902,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
-                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
-                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
+                            onSelectSameNumberCooldown = { onMomentSelectSameNumberCooldown(MomentEditKind.MISSED, it) },
+                            onSelectGlobalQuiet = { onMomentSelectGlobalQuiet(MomentEditKind.MISSED, it) },
                             onSelectScope = { onMomentSelectScope(MomentEditKind.MISSED, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.MISSED) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -895,8 +926,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             accessibilityEnabled = accessibilityEnabled,
-                            sameNumberCooldown = sameNumberCooldown,
-                            globalQuiet = globalQuiet,
+                            generalSameNumberCooldown = sameNumberCooldown,
+                            generalGlobalQuiet = globalQuiet,
+                            sameNumberChoice = endedSameNumberChoice,
+                            globalQuietChoice = endedGlobalQuietChoice,
                             scopeOverride = endedScopeOverride,
                             cardAttached = endedCardAttached,
                             cardText = ContactTextCard.build(myDetailsStore.load()),
@@ -909,8 +942,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
-                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
-                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
+                            onSelectSameNumberCooldown = { onMomentSelectSameNumberCooldown(MomentEditKind.ENDED, it) },
+                            onSelectGlobalQuiet = { onMomentSelectGlobalQuiet(MomentEditKind.ENDED, it) },
                             onSelectScope = { onMomentSelectScope(MomentEditKind.ENDED, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.ENDED) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -933,8 +966,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             selectedChannel = selectedChannel,
                             approvalMode = approvalMode,
                             accessibilityEnabled = accessibilityEnabled,
-                            sameNumberCooldown = sameNumberCooldown,
-                            globalQuiet = globalQuiet,
+                            generalSameNumberCooldown = sameNumberCooldown,
+                            generalGlobalQuiet = globalQuiet,
+                            sameNumberChoice = noAnswerSameNumberChoice,
+                            globalQuietChoice = noAnswerGlobalQuietChoice,
                             scopeOverride = noAnswerScopeOverride,
                             cardAttached = noAnswerCardAttached,
                             cardText = ContactTextCard.build(myDetailsStore.load()),
@@ -947,8 +982,8 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             onSelectChannel = ::onMomentSelectChannel,
                             onSelectApprovalMode = ::onMomentSelectApproval,
                             onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
-                            onSelectSameNumberCooldown = ::onSelectSameNumberCooldown,
-                            onSelectGlobalQuiet = ::onSelectGlobalQuiet,
+                            onSelectSameNumberCooldown = { onMomentSelectSameNumberCooldown(MomentEditKind.NO_ANSWER, it) },
+                            onSelectGlobalQuiet = { onMomentSelectGlobalQuiet(MomentEditKind.NO_ANSWER, it) },
                             onSelectScope = { onMomentSelectScope(MomentEditKind.NO_ANSWER, it) },
                             onToggleCardAttached = { onMomentToggleCardAttached(MomentEditKind.NO_ANSWER) },
                             onEditSelectedPeople = { modal = AccessibilityModal.ALLOWED_RECIPIENTS },
@@ -1003,6 +1038,10 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         workingHoursSettings = workingHoursSettings,
                         exclusionsStore = exclusionsStore,
                         generalScope = generalScope,
+                        generalSameNumberCooldown = sameNumberCooldown,
+                        generalGlobalQuiet = globalQuiet,
+                        onSelectGeneralSameNumberCooldown = ::onSelectGeneralSameNumberCooldown,
+                        onSelectGeneralGlobalQuiet = ::onSelectGeneralGlobalQuiet,
                         onSelectGeneralScope = { scope ->
                             generalScope = scope
                             generalScopeSettings.scope = scope
@@ -1154,8 +1193,10 @@ private fun MomentEditScreen(
     selectedChannel: FollowUpChannel,
     approvalMode: MomentApprovalMode,
     accessibilityEnabled: Boolean,
-    sameNumberCooldown: Long?,
-    globalQuiet: Long?,
+    generalSameNumberCooldown: Long?,
+    generalGlobalQuiet: Long?,
+    sameNumberChoice: CooldownChoice,
+    globalQuietChoice: CooldownChoice,
     scopeOverride: RecipientScope?,
     cardAttached: Boolean,
     cardText: String,
@@ -1165,8 +1206,8 @@ private fun MomentEditScreen(
     onSelectChannel: (FollowUpChannel) -> Unit,
     onSelectApprovalMode: (MomentApprovalMode) -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
-    onSelectSameNumberCooldown: (Long?) -> Unit,
-    onSelectGlobalQuiet: (Long?) -> Unit,
+    onSelectSameNumberCooldown: (CooldownChoice) -> Unit,
+    onSelectGlobalQuiet: (CooldownChoice) -> Unit,
     onSelectScope: (RecipientScope?) -> Unit,
     onToggleCardAttached: () -> Unit,
     onEditSelectedPeople: () -> Unit,
@@ -1408,34 +1449,34 @@ private fun MomentEditScreen(
                     Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
                 }
 
-                // הגבלת תדירות — moved here from Settings (TASK 4). Two GLOBAL timing brakes, plain
-                // labels. Same-number picks any interval (or "בלי המתנה"); the old on/off toggle maps
-                // to 24h-on / off. Both write the same global cooldownSettings the send path honors.
+                // הגבלת תדירות — per-moment now (override-on-default). "לפי הכללי (X)" inherits the
+                // general default set in הגדרות חכמות; a concrete duration or "בלי המתנה" overrides it
+                // for THIS moment only, without touching the general or the other moments.
                 SettingRow(
                     title = "הגבלת תדירות",
-                    subtitle = "כל כמה זמן לשלוח שוב לאותו אדם · חל על כל התרחישים",
+                    subtitle = "כל כמה זמן לשלוח שוב לאותו אדם · ברירת המחדל נקבעת ב'הגדרות חכמות'",
                     showDivider = true
                 ) {
                     SettingSelect(
-                        selectedLabel = FollowUpCooldownOptions.labelFor(
-                            FollowUpCooldownOptions.sameNumber, sameNumberCooldown
+                        selectedLabel = momentCooldownLabel(
+                            FollowUpCooldownOptions.sameNumber, generalSameNumberCooldown, sameNumberChoice
                         ),
-                        options = FollowUpCooldownOptions.sameNumber.map { it.millis to it.label },
+                        options = momentCooldownOptions(FollowUpCooldownOptions.sameNumber, generalSameNumberCooldown),
                         onSelect = onSelectSameNumberCooldown
                     )
                 }
 
-                // מרווח מינימלי בין הודעות — the anti-burst brake (globalQuietMillis). Also global.
+                // מרווח מינימלי בין הודעות — the anti-burst brake, also per-moment override-on-default.
                 SettingRow(
                     title = "מרווח מינימלי בין הודעות",
-                    subtitle = "מרווח מינימלי בין שתי הודעות · חל על כל התרחישים",
+                    subtitle = "מרווח מינימלי בין שתי הודעות · ברירת המחדל נקבעת ב'הגדרות חכמות'",
                     showDivider = false
                 ) {
                     SettingSelect(
-                        selectedLabel = FollowUpCooldownOptions.labelFor(
-                            FollowUpCooldownOptions.globalQuiet, globalQuiet
+                        selectedLabel = momentCooldownLabel(
+                            FollowUpCooldownOptions.globalQuiet, generalGlobalQuiet, globalQuietChoice
                         ),
-                        options = FollowUpCooldownOptions.globalQuiet.map { it.millis to it.label },
+                        options = momentCooldownOptions(FollowUpCooldownOptions.globalQuiet, generalGlobalQuiet),
                         onSelect = onSelectGlobalQuiet
                     )
                 }
@@ -1509,6 +1550,38 @@ private fun momentScopeOptions(): List<Pair<RecipientScope?, String>> =
         RecipientScope.entries.map { it to recipientScopeLabel(it) }
 
 private const val FOLLOW_GENERAL_LABEL = "כמו הכללי"
+
+/**
+ * The per-moment cooldown options for one brake, as a 3-state [CooldownChoice] list:
+ *   1. "לפי הכללי (X)" ⇒ [CooldownChoice.Inherit] — X is the current general label so the user sees
+ *      what they'd inherit.
+ *   2. the concrete durations from [FollowUpCooldownOptions] ⇒ [CooldownChoice.Value].
+ *   3. "בלי המתנה" ⇒ [CooldownChoice.Off] — the option's `null` entry, kept distinct from Inherit.
+ * Reuses [FollowUpCooldownOptions] verbatim; the general label reuses its own labelFor.
+ */
+private fun momentCooldownOptions(
+    choices: List<FollowUpCooldownOptions.Choice>,
+    generalMillis: Long?
+): List<Pair<CooldownChoice, String>> {
+    val generalLabel = FollowUpCooldownOptions.labelFor(choices, generalMillis)
+    return listOf<Pair<CooldownChoice, String>>(
+        CooldownChoice.Inherit to "לפי הכללי ($generalLabel)"
+    ) + choices.map { choice ->
+        val state: CooldownChoice = choice.millis?.let { CooldownChoice.Value(it) } ?: CooldownChoice.Off
+        state to choice.label
+    }
+}
+
+/** The label for a moment's current [CooldownChoice] on one brake. */
+private fun momentCooldownLabel(
+    choices: List<FollowUpCooldownOptions.Choice>,
+    generalMillis: Long?,
+    choice: CooldownChoice
+): String = when (choice) {
+    CooldownChoice.Inherit -> "לפי הכללי (${FollowUpCooldownOptions.labelFor(choices, generalMillis)})"
+    CooldownChoice.Off -> FollowUpCooldownOptions.labelFor(choices, null)
+    is CooldownChoice.Value -> FollowUpCooldownOptions.labelFor(choices, choice.millis)
+}
 
 /**
  * One unified settings row (edit-scenario-fixed.html .setting-row): title + subtitle on the right,
@@ -3624,6 +3697,10 @@ private fun SmartRulesScreen(
     workingHoursSettings: WorkingHoursSettings,
     exclusionsStore: ExclusionsStore,
     generalScope: RecipientScope,
+    generalSameNumberCooldown: Long?,
+    generalGlobalQuiet: Long?,
+    onSelectGeneralSameNumberCooldown: (Long?) -> Unit,
+    onSelectGeneralGlobalQuiet: (Long?) -> Unit,
     onSelectGeneralScope: (RecipientScope) -> Unit,
     exclusionsPreview: RecipientPreview,
     onOpenExclusions: () -> Unit,
@@ -3766,6 +3843,51 @@ private fun SmartRulesScreen(
                         selectedLabel = recipientScopeLabel(generalScope),
                         options = RecipientScope.entries.map { it to recipientScopeLabel(it) },
                         onSelect = onSelectGeneralScope
+                    )
+                }
+            }
+        }
+
+        // General frequency brakes (default) — the single source every moment inherits while it stays
+        // on "לפי הכללי". Each moment can still override these on its own edit page (override-on-
+        // default). Reuses the existing FollowUpCooldownOptions verbatim.
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(AccessibilityIcons.Schedule, contentDescription = null, tint = AccessibilityColors.Primary, modifier = Modifier.size(20.dp))
+                    Text("הגבלת תדירות (כללי)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AccessibilityColors.Heading)
+                }
+                Text(
+                    "ברירת המחדל לכל התרחישים · כל תרחיש יכול לעקוף בעמוד שלו.",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = AccessibilityColors.TextMuted,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                SettingRow(
+                    title = "כל כמה זמן לשלוח שוב לאותו אדם",
+                    subtitle = "מרווח מינימלי בין שתי הודעות לאותו מספר",
+                    showDivider = true
+                ) {
+                    SettingSelect(
+                        selectedLabel = FollowUpCooldownOptions.labelFor(
+                            FollowUpCooldownOptions.sameNumber, generalSameNumberCooldown
+                        ),
+                        options = FollowUpCooldownOptions.sameNumber.map { it.millis to it.label },
+                        onSelect = onSelectGeneralSameNumberCooldown
+                    )
+                }
+                SettingRow(
+                    title = "מרווח מינימלי בין הודעות",
+                    subtitle = "מרווח מינימלי בין שתי הודעות כלשהן",
+                    showDivider = false
+                ) {
+                    SettingSelect(
+                        selectedLabel = FollowUpCooldownOptions.labelFor(
+                            FollowUpCooldownOptions.globalQuiet, generalGlobalQuiet
+                        ),
+                        options = FollowUpCooldownOptions.globalQuiet.map { it.millis to it.label },
+                        onSelect = onSelectGeneralGlobalQuiet
                     )
                 }
             }

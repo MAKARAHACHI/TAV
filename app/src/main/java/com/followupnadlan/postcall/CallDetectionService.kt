@@ -22,8 +22,10 @@ import com.followupnadlan.R
 import com.followupnadlan.accessibility.AllowedRecipientsStore
 import com.followupnadlan.accessibility.EffectiveRecipientScope
 import com.followupnadlan.accessibility.EndedScopeSettings
+import com.followupnadlan.accessibility.EffectiveCooldown
 import com.followupnadlan.accessibility.FollowUpCooldownSettings
 import com.followupnadlan.accessibility.GeneralRecipientScopeSettings
+import com.followupnadlan.accessibility.MomentCooldownOverrideSettings
 import com.followupnadlan.accessibility.NoAnswerScopeSettings
 import com.followupnadlan.accessibility.LocalMomentResolver
 import com.followupnadlan.accessibility.WorkingHoursDecider
@@ -132,6 +134,17 @@ class CallDetectionService : Service() {
             EndedMoment.ENDED ->
                 EffectiveRecipientScope.of(EndedScopeSettings(context).scopeOverride, generalScope)
         }
+        // Override-on-default for the two frequency brakes, resolved for THIS moment. Inherit ⇒ the
+        // general default (unchanged today's behavior); Off ⇒ null (no brake); Value ⇒ that interval.
+        // EndedSuggestionDecider consumes the resolved windows exactly as before.
+        val cooldownOverride = when (moment) {
+            EndedMoment.NO_ANSWER_OUTGOING -> MomentCooldownOverrideSettings.forNoAnswer(context)
+            EndedMoment.ENDED -> MomentCooldownOverrideSettings.forEnded(context)
+        }
+        val effectiveSameNumberCooldown =
+            EffectiveCooldown.resolve(cooldownOverride.sameNumberOverride, cooldowns.sameNumberCooldownMillis)
+        val effectiveGlobalQuiet =
+            EffectiveCooldown.resolve(cooldownOverride.globalQuietOverride, cooldowns.globalQuietMillis)
         val decision = EndedSuggestionDecider.decide(
             EndedSuggestionInput(
                 callDurationSeconds = latestCall.durationSeconds,
@@ -142,8 +155,8 @@ class CallDetectionService : Service() {
                 allowedNumbers = AllowedRecipientsStore(context).load().map { it.number },
                 lastSuggestedAtEpochMs = suggestionStore.lastSuggestedAt(phone),
                 lastAnyNotificationAtEpochMs = suggestionStore.lastAnyNotificationAt(),
-                sameNumberCooldownMillis = cooldowns.sameNumberCooldownMillis,
-                globalQuietMillis = cooldowns.globalQuietMillis,
+                sameNumberCooldownMillis = effectiveSameNumberCooldown,
+                globalQuietMillis = effectiveGlobalQuiet,
                 nowEpochMs = now,
                 withinWorkingHours = WorkingHoursDecider.isWithinWorkingHours(
                     LocalMomentResolver.resolve(now),

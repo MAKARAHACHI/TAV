@@ -48,6 +48,8 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val whatsAppAutoSendController = WhatsAppAutoSendController(context)
     private val recipientScopeSettings = RecipientScopeSettings(context)
     private val generalRecipientScopeSettings = GeneralRecipientScopeSettings(context)
+    private val generalCooldownSettings = com.followupnadlan.accessibility.FollowUpCooldownSettings(context)
+    private val missedCooldownOverride = com.followupnadlan.accessibility.MomentCooldownOverrideSettings.forMissed(context)
     private val exclusionsStore = ExclusionsStore(context)
     private val allowedRecipientsStore = AllowedRecipientsStore(context)
     private val contactVerifier = ContactVerifier(context)
@@ -443,7 +445,14 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         nowEpochMs = now,
         templateAvailable = templateAvailable,
         manualFallbackAvailable = settings.manualSmsFallbackEnabled && canShowManualFallback(normalizedPhone ?: phone, message),
-        cooldownMillis = settings.cooldownMillis,
+        // Override-on-default per-number brake for the MISSED moment: resolve the missed override
+        // against the general same-number default. Inherit ⇒ the general value (today's behavior);
+        // Off ⇒ no brake (0L, so no send is ever suppressed as a duplicate); Value ⇒ that interval.
+        // The decider is unchanged — it still consumes a single cooldownMillis.
+        cooldownMillis = com.followupnadlan.accessibility.EffectiveCooldown.resolve(
+            missedCooldownOverride.sameNumberOverride,
+            generalCooldownSettings.sameNumberCooldownMillis
+        ) ?: 0L,
         excluded = exclusionsStore.isExcluded(normalizedPhone ?: phone),
         // Override-on-default: the missed moment's per-moment override wins, else the general
         // default. Resolved here at the call site; the decision logic is unchanged.
