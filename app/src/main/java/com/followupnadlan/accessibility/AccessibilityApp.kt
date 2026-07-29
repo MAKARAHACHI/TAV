@@ -1298,6 +1298,18 @@ private fun MomentEditScreen(
                         // as "delivered & read".
                     }
                 }
+                // TASK 2: the reusable card chip sits next to the preview bubble (replacing the old
+                // settings Switch). On the edit page it PERSISTS to the moment's saved card setting
+                // (unlike the sheet's per-send flag). Hidden entirely when the profile has no card.
+                if (cardText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        CardAttachChip(attached = cardAttached, onToggle = onToggleCardAttached)
+                    }
+                }
             }
         }
 
@@ -1438,17 +1450,6 @@ private fun MomentEditScreen(
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F2F5)))
                 }
 
-                // צירוף כרטיס ביקור — the add/remove card control, available on EVERY moment. ON =
-                // the card element is attached to the message artifact; OFF = removed. Drawn element
-                // only — no real .vcf file is sent (WhatsApp blocks file-share to unsaved numbers, §2).
-                SettingRow(
-                    title = "צירוף כרטיס ביקור",
-                    subtitle = "הוסף כרטיס איש קשר לשמירה מהירה אצל הלקוח",
-                    showDivider = true
-                ) {
-                    Switch(checked = cardAttached, onCheckedChange = { onToggleCardAttached() })
-                }
-
                 // הגבלת תדירות — per-moment now (override-on-default). "לפי הכללי (X)" inherits the
                 // general default set in הגדרות חכמות; a concrete duration or "בלי המתנה" overrides it
                 // for THIS moment only, without touching the general or the other moments.
@@ -1581,6 +1582,32 @@ private fun momentCooldownLabel(
     CooldownChoice.Inherit -> "לפי הכללי (${FollowUpCooldownOptions.labelFor(choices, generalMillis)})"
     CooldownChoice.Off -> FollowUpCooldownOptions.labelFor(choices, null)
     is CooldownChoice.Value -> FollowUpCooldownOptions.labelFor(choices, choice.millis)
+}
+
+/**
+ * The pill "הסר/הוסף כרטיס" chip (Wave E), extracted so the approval sheet AND the moment-edit page
+ * render the SAME control. [attached] drives the label; [onToggle] flips it. The caller decides the
+ * semantics — the sheet toggles a per-send flag, the edit page persists to the moment's saved card
+ * setting. The caller also decides visibility (hidden when there is no card to attach).
+ */
+@Composable
+private fun CardAttachChip(attached: Boolean, onToggle: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = AccessibilityColors.Surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AccessibilityColors.CardBorder),
+        modifier = Modifier.clickable(
+            onClickLabel = if (attached) "הסר כרטיס ביקור מההודעה הזו" else "הוסף כרטיס ביקור להודעה הזו"
+        ) { onToggle() }
+    ) {
+        Text(
+            text = if (attached) "הסר כרטיס" else "הוסף כרטיס",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = AccessibilityColors.TextBody,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        )
+    }
 }
 
 /**
@@ -2696,23 +2723,7 @@ private fun MissedCallPromptScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (cardAvailable) {
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = AccessibilityColors.Surface,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, AccessibilityColors.CardBorder),
-                                    modifier = Modifier
-                                        .clickable(
-                                            onClickLabel = if (cardOn) "הסר כרטיס ביקור מההודעה הזו" else "הוסף כרטיס ביקור להודעה הזו"
-                                        ) { cardOn = !cardOn }
-                                ) {
-                                    Text(
-                                        text = if (cardOn) "הסר כרטיס" else "הוסף כרטיס",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = AccessibilityColors.TextBody,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                                    )
-                                }
+                                CardAttachChip(attached = cardOn, onToggle = { cardOn = !cardOn })
                             } else {
                                 Spacer(modifier = Modifier.width(1.dp))
                             }
