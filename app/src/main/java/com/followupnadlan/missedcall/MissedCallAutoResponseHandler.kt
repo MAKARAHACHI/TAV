@@ -291,6 +291,22 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         return evaluateCandidate(candidate, now).decisionInput.let(MissedCallAutoResponseDecision::decide)
     }
 
+    /**
+     * The exact missed-call message text that WOULD be sent for [phoneNumber] — the same composition
+     * the engine uses ([evaluateCandidate]), so §2 holds: what "נסה על עצמך" opens in WhatsApp is what
+     * a real client would receive. This is composition ONLY — it deliberately does NOT run the
+     * recipient/cooldown/working-hours filters, because "try on yourself" is a user-initiated test on a
+     * number they typed, not a real incoming call. Returns "" if no template is available.
+     */
+    fun composeMissedMessageFor(phoneNumber: String): String {
+        val candidate = MissedCallCandidate(
+            phoneNumber = phoneNumber,
+            direction = MissedCallDirection.INCOMING,
+            wasAnswered = false
+        )
+        return evaluateCandidate(candidate, System.currentTimeMillis()).message
+    }
+
     private fun attemptWhatsAppAutoSend(
         normalizedPhone: String,
         message: String,
