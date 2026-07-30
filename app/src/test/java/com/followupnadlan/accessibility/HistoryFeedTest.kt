@@ -79,7 +79,7 @@ class HistoryFeedTest {
     @Test
     fun `no-answer-sourced send classifies as no-answer moment`() {
         val entry = FollowUpLogEntry(
-            actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+            actionType = FollowUpActionType.WHATSAPP_AUTO_SENT,
             timestampEpochMs = epochMsAt(today, 12, 30),
             messagePreview = "ניסיתי להתקשר",
             phone = "972549876543",
@@ -94,9 +94,26 @@ class HistoryFeedTest {
     }
 
     @Test
-    fun `ended-sourced send is unaffected by no-answer classification`() {
+    fun `no-answer-sourced opened WhatsApp reads as opened, not sent`() {
         val entry = FollowUpLogEntry(
             actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+            timestampEpochMs = epochMsAt(today, 12, 30),
+            messagePreview = "ניסיתי להתקשר",
+            phone = "972549876543",
+            source = com.followupnadlan.postcall.NoAnswerFollowUpMessage.SOURCE
+        )
+
+        val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+
+        assertEquals(1, rows.size)
+        assertEquals(HistoryMoment.NO_ANSWER, rows[0].moment)
+        assertEquals("WhatsApp נפתח (לחץ שלח)", rows[0].summary)
+    }
+
+    @Test
+    fun `ended-sourced send is unaffected by no-answer classification`() {
+        val entry = FollowUpLogEntry(
+            actionType = FollowUpActionType.WHATSAPP_AUTO_SENT,
             timestampEpochMs = epochMsAt(today, 12, 30),
             messagePreview = "",
             phone = "972549876543",
@@ -106,6 +123,42 @@ class HistoryFeedTest {
         val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
 
         assertEquals(HistoryMoment.MISSED, rows[0].moment)
+    }
+
+    @Test
+    fun `opened WhatsApp reads as opened, not sent, and is excluded from client-facing count`() {
+        val entry = FollowUpLogEntry(
+            actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+            timestampEpochMs = epochMsAt(today, 10, 0),
+            messagePreview = "",
+            phone = "972500000009"
+        )
+
+        val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+
+        assertEquals(1, rows.size)
+        assertEquals(HistoryMoment.MISSED, rows[0].moment)
+        assertEquals("WhatsApp נפתח (לחץ שלח)", rows[0].summary)
+        assertTrue(!FollowUpActionType.WHATSAPP_REPLY_OPENED.isClientFacingSend())
+    }
+
+    @Test
+    fun `the three real sent types map to sent wording and are client-facing`() {
+        listOf(
+            FollowUpActionType.AUTO_SMS_SENT,
+            FollowUpActionType.WHATSAPP_AUTO_SENT,
+            FollowUpActionType.FALLBACK_SMS_SENT
+        ).forEach { sentType ->
+            assertTrue(sentType.isClientFacingSend())
+            val entry = FollowUpLogEntry(
+                actionType = sentType,
+                timestampEpochMs = epochMsAt(today, 10, 0),
+                messagePreview = "",
+                phone = "972500000009"
+            )
+            val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+            assertEquals("נשלחה הודעת \"לא עניתי\"", rows[0].summary)
+        }
     }
 
     @Test

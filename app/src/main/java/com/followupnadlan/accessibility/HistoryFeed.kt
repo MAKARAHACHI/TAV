@@ -63,17 +63,33 @@ internal object HistoryFeed {
     }
 
     private fun classify(entry: FollowUpLogEntry): Pair<HistoryMoment, String>? {
-        // The "לא ענו" moment shares the ended send path, so its rows are told apart by source,
-        // not action type. A no-answer-sourced send outranks the action-type mapping below.
-        if (entry.source == NoAnswerFollowUpMessage.SOURCE && entry.actionType.isClientFacingSend()) {
-            return HistoryMoment.NO_ANSWER to "נשלחה הודעת \"לא ענו\""
+        // The "לא ענו" moment shares the missed send path, so its rows are told apart by source,
+        // not action type. A no-answer-sourced row outranks the action-type mapping below for the
+        // MOMENT only — the honest sent-vs-opened wording (below) still depends on the actual action
+        // type: opened is never worded as sent, even under the no-answer source.
+        if (entry.source == NoAnswerFollowUpMessage.SOURCE) {
+            return when (entry.actionType) {
+                FollowUpActionType.AUTO_SMS_SENT,
+                FollowUpActionType.WHATSAPP_AUTO_SENT,
+                FollowUpActionType.FALLBACK_SMS_SENT ->
+                    HistoryMoment.NO_ANSWER to "נשלחה הודעת \"לא ענו\""
+
+                FollowUpActionType.WHATSAPP_REPLY_OPENED ->
+                    HistoryMoment.NO_ANSWER to "WhatsApp נפתח (לחץ שלח)"
+
+                else -> null
+            }
         }
         return when (entry.actionType) {
             FollowUpActionType.AUTO_SMS_SENT,
             FollowUpActionType.WHATSAPP_AUTO_SENT,
-            FollowUpActionType.FALLBACK_SMS_SENT,
-            FollowUpActionType.WHATSAPP_REPLY_OPENED ->
+            FollowUpActionType.FALLBACK_SMS_SENT ->
                 HistoryMoment.MISSED to "נשלחה הודעת \"לא עניתי\""
+
+            // Opened WhatsApp with the chat prepared — NOT proof of a send (§2). The user still has
+            // to press send, and for a number without WhatsApp the chat may not even resolve.
+            FollowUpActionType.WHATSAPP_REPLY_OPENED ->
+                HistoryMoment.MISSED to "WhatsApp נפתח (לחץ שלח)"
 
             FollowUpActionType.CONTACT_CARD_OPENED ->
                 HistoryMoment.ENDED to "נשלחו פרטי קשר"
@@ -90,16 +106,17 @@ internal object HistoryFeed {
 }
 
 /**
- * A client-facing follow-up SEND — a message the client actually received across any of the three
- * moments (missed / ended-card / no-answer), auto or manual, WhatsApp or SMS. Internal steps
- * (permission prompts, diagnostics, skips, failures, "prepared/pending" states) are excluded, so
- * both the activity log and the home today-count count only what reached a client.
+ * A client-facing follow-up SEND — a message best-available evidence says the client actually
+ * received, across any of the three moments (missed / ended-card / no-answer), auto or manual,
+ * WhatsApp or SMS. Internal steps (permission prompts, diagnostics, skips, failures) are excluded,
+ * AND so is merely OPENING WhatsApp (§2: opened != sent — WhatsApp exposes no delivery receipt, and
+ * the user still has to press send themselves) so both the activity log and the home today-count
+ * count only what reached a client, never what was merely prepared/opened.
  */
 internal fun FollowUpActionType.isClientFacingSend(): Boolean = when (this) {
     FollowUpActionType.AUTO_SMS_SENT,
     FollowUpActionType.WHATSAPP_AUTO_SENT,
     FollowUpActionType.FALLBACK_SMS_SENT,
-    FollowUpActionType.WHATSAPP_REPLY_OPENED,
     FollowUpActionType.CONTACT_CARD_OPENED -> true
     else -> false
 }

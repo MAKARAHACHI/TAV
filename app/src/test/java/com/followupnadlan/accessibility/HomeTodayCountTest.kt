@@ -77,7 +77,7 @@ class HomeTodayCountTest {
             send("972500000001", actionType = FollowUpActionType.WHATSAPP_AUTO_SENT),
             send("972500000002", actionType = FollowUpActionType.CONTACT_CARD_OPENED),
             FollowUpLogEntry(
-                actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+                actionType = FollowUpActionType.AUTO_SMS_SENT,
                 timestampEpochMs = epochMsAt(today, 12, 0),
                 messagePreview = "",
                 phone = "972500000003",
@@ -85,6 +85,21 @@ class HomeTodayCountTest {
             )
         )
         assertEquals(3, HomeTodayCount.of(entries, zoneId = zone, today = today))
+    }
+
+    @Test
+    fun `opened-but-not-sent WhatsApp does not inflate the today count (§2)`() {
+        val entries = listOf(
+            send("972500000001", actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED),
+            FollowUpLogEntry(
+                actionType = FollowUpActionType.WHATSAPP_REPLY_OPENED,
+                timestampEpochMs = epochMsAt(today, 12, 0),
+                messagePreview = "",
+                phone = "972500000002",
+                source = com.followupnadlan.postcall.NoAnswerFollowUpMessage.SOURCE
+            )
+        )
+        assertEquals(0, HomeTodayCount.of(entries, zoneId = zone, today = today))
     }
 
     @Test

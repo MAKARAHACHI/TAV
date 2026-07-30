@@ -12,9 +12,12 @@ import org.junit.Test
 
 /**
  * Proves the wiring fix: the source [FollowUpPromptSender] stamps on a no-answer send is exactly the
- * tag [HomeTodayCount] and [HistoryFeed] key off, so a no-answer send now counts in "היום" and shows
- * as a NO_ANSWER row. The send() call itself opens WhatsApp (Android), so this verifies the log
- * entry it produces — built via the same sourceFor mapping — flows through the counters.
+ * tag [HomeTodayCount] and [HistoryFeed] key off, so a no-answer send shows as a NO_ANSWER row. WAVE
+ * H (§2): the immediate marker [FollowUpPromptSender] logs on OPENED is WHATSAPP_REPLY_OPENED — an
+ * open, not a proven send — so it now shows honestly as "נפתח" in history and is NOT tallied in the
+ * today-count (only WHATSAPP_AUTO_SENT/AUTO_SMS_SENT/FALLBACK_SMS_SENT are). The accessibility
+ * service adds WHATSAPP_AUTO_SENT separately once it actually clicks send; that is covered by the
+ * plain "sent types count" tests elsewhere and is unaffected here.
  */
 class FollowUpPromptSenderSourceTest {
     private val zone = ZoneOffset.UTC
@@ -49,16 +52,16 @@ class FollowUpPromptSenderSourceTest {
     }
 
     @Test
-    fun `a no-answer send is counted by HomeTodayCount`() {
+    fun `an opened-but-not-yet-sent no-answer entry is NOT counted by HomeTodayCount (§2)`() {
         val entries = listOf(noAnswerSend("972500000001", hour = 10))
-        assertEquals(1, HomeTodayCount.of(entries, zoneId = zone, today = today))
+        assertEquals(0, HomeTodayCount.of(entries, zoneId = zone, today = today))
     }
 
     @Test
-    fun `a no-answer send is classified NO_ANSWER by HistoryFeed`() {
+    fun `a no-answer send is classified NO_ANSWER by HistoryFeed, worded as opened not sent`() {
         val rows = HistoryFeed.rows(listOf(noAnswerSend("972500000001", hour = 10)), zoneId = zone, today = today)
         assertEquals(1, rows.size)
         assertEquals(HistoryMoment.NO_ANSWER, rows[0].moment)
-        assertEquals("נשלחה הודעת \"לא ענו\"", rows[0].summary)
+        assertEquals("WhatsApp נפתח (לחץ שלח)", rows[0].summary)
     }
 }
