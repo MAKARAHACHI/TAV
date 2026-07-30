@@ -17,8 +17,10 @@ import com.followupnadlan.profile.ContactCard
  * When the card is on the card REPLACES the one-line signature — the name/role/phone already live
  * in the card, so the separate `{name}·{role}·{phone}` line is dropped to avoid saying it twice.
  *
- * When the card is NOT attached, behaviour is exactly as before: the template body with its own
- * link lines ([MessageComposition]) plus the one-line signature.
+ * WAVE G: when the card is OFF, NO signature is appended either — the message is the template body
+ * (with its own link lines, [MessageComposition]) and nothing else. Card ON → formatted card; card
+ * OFF → body only. The one-line [com.followupnadlan.profile.SignatureLine] is no longer appended
+ * anywhere in this composer.
  *
  * Website de-duplication: when the card is on it OWNS the website/phone lines, so the template's
  * own `cardLink`/`websiteLink` append ([MessageComposition]) is suppressed for that moment; the raw
@@ -42,9 +44,8 @@ object MomentMessageComposer {
         attachCard: Boolean
     ): String {
         if (!attachCard) {
-            // Old behaviour, untouched: body (+ link lines) + one-line signature.
+            // WAVE G: card off ⇒ body (+ link lines) ONLY, no signature at all.
             return EndedMessageComposer.compose(bodyWithLinks, card, attachCard = false)
-                .let { withSignature(it, card) }
         }
         // Card on: raw body (no link lines), then the text card — which REPLACES the one-line
         // signature (name/role/phone live in the card). No signature is appended here.
@@ -59,7 +60,4 @@ object MomentMessageComposer {
             card = card,
             attachCard = attachCard
         )
-
-    private fun withSignature(body: String, card: ContactCard): String =
-        com.followupnadlan.profile.SignatureLine.append(body, card)
 }

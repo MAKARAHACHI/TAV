@@ -19,21 +19,24 @@ class MomentMessageComposerTest {
     private val bodyWithLinks = "תודה על השיחה!\n\n${MessageComposition.WEBSITE_LABEL} https://domain.co.il"
     private val bodyWithoutLinks = "תודה על השיחה!"
 
+    // WAVE G: card OFF ⇒ body only, no signature at all anymore.
     @Test
-    fun cardOffKeepsOldBehaviourBodyWithLinksPlusSignature() {
+    fun cardOffKeepsLinkLineButDropsTheSignatureEntirely() {
         val out = MomentMessageComposer.compose(bodyWithLinks, bodyWithoutLinks, card, attachCard = false)
-        // Old link line survives, one-line signature closes it, no text card.
+        // Old link line survives, but no signature and no text card.
         assertTrue(out.contains(MessageComposition.WEBSITE_LABEL))
-        assertTrue(out.contains(SignatureLine.render(card)))
+        assertFalse(out.contains(SignatureLine.render(card)))
         assertEquals("שלמה בן ארצי · עורך דין · 054-5555565", SignatureLine.render(card))
         assertFalse(out.contains("לשמירה מהירה"))
+        assertEquals(bodyWithLinks.trim(), out)
     }
 
     @Test
-    fun cardOffNameOnlyStillAppendsTheNameSignatureAndNoTextCard() {
+    fun cardOffNameOnlyIsBodyOnlyNoSignatureNoTextCard() {
         val out = MomentMessageComposer.compose(bodyWithoutLinks, bodyWithoutLinks, nameOnlyCard, attachCard = false)
-        // Signature = just the name; no formatted text card at all.
-        assertTrue(out.contains("שלמה בן ארצי"))
+        // WAVE G: no signature is appended, even for a name-only profile — body only.
+        assertFalse(out.contains("שלמה בן ארצי"))
+        assertEquals(bodyWithoutLinks.trim(), out)
         assertFalse(out.contains("לשמירה מהירה"))
         assertFalse(out.contains("📱"))
     }
@@ -131,5 +134,24 @@ class MomentMessageComposerTest {
         assertFalse(out.contains(MessageComposition.WEBSITE_LABEL))
         assertFalse(out.contains(SignatureLine.render(card)))
         assertTrue(out.contains("📱 *לשמירה מהירה באנשי הקשר:*"))
+    }
+
+    // WAVE G: the template overload's card-OFF path (used by EndedFollowUpMessage /
+    // NoAnswerFollowUpMessage) must also drop the signature — body + template link lines only.
+    @Test
+    fun templateOverloadCardOffIsBodyWithLinksOnlyNoSignature() {
+        val template = MessageTemplate(
+            id = "t1",
+            title = "ended",
+            body = "תודה על השיחה!",
+            cardLink = "",
+            websiteLink = "https://domain.co.il",
+            role = TemplateRole.CALL_ENDED
+        )
+        val out = MomentMessageComposer.compose(template, card, attachCard = false)
+        assertTrue(out.contains(MessageComposition.WEBSITE_LABEL))
+        assertFalse(out.contains(SignatureLine.render(card)))
+        assertFalse(out.contains("📱"))
+        assertEquals(MessageComposition.build(template), out)
     }
 }

@@ -497,13 +497,12 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     )
 
     /**
-     * Renders the template and appends the signature line — §5: the signature closes *both* the
-     * missed and the ended message, with no skip logic. On an empty/partial profile
-     * [SignatureLine] drops what it cannot fill, so a placeholder never reaches a client.
-     *
-     * [attachCard] is honored so the ended journey's "מצורף" switch changes the message that is
-     * actually sent, not just its preview. It never applies to missed: there the signature is how
-     * the client knows who is answering them.
+     * Renders the template and, when [attachCard] is true, appends the one-line signature. WAVE G:
+     * card OFF ⇒ body only, no signature anywhere (see [renderMissedMessage]) — this helper's
+     * [attachCard] parameter now means "append the one-line signature", used by the card-OFF caller
+     * with `attachCard = false` (no signature) and never invoked with `true` for the OFF case
+     * anymore. On an empty/partial profile [SignatureLine] drops what it cannot fill, so a
+     * placeholder never reaches a client.
      */
     private fun renderMessage(templateBody: String, attachCard: Boolean = true): String {
         val profile = profileStore.load()
@@ -528,11 +527,10 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     }
 
     /**
-     * The full outgoing missed-call message. When the missed moment's card toggle is ON, the
-     * formatted TEXT business card REPLACES the one-line signature (name/role/phone live in the
-     * card, so the separate signature line is dropped to avoid saying it twice), and the template's
-     * own website/card link lines are suppressed so the website is not shown twice — the card owns
-     * them. When the card is OFF, the one-line signature closes the body as before (§5). The
+     * The full outgoing missed-call message. WAVE G: card ON ⇒ formatted TEXT business card
+     * (name/role/phone live in the card, template's own website/card link lines suppressed so the
+     * website is not shown twice — the card owns them). Card OFF ⇒ body + link lines ONLY, no
+     * signature at all — the one-line [SignatureLine] is no longer appended in the OFF case. The
      * composed string is exactly what the preview shows (§2).
      */
     private fun renderMissedMessage(template: MessageTemplate): String {
@@ -543,8 +541,8 @@ class MissedCallAutoResponseHandler(private val context: Context) {
             val rawBody = renderMessage(template.body, attachCard = false)
             com.followupnadlan.templates.ContactTextCard.append(rawBody, card)
         } else {
-            // Card off: unchanged — body + link lines + signature.
-            renderMessage(MessageComposition.build(template), attachCard = true)
+            // Card off: body + link lines, tag-rendered, NO signature (WAVE G).
+            renderMessage(MessageComposition.build(template), attachCard = false)
         }
     }
 

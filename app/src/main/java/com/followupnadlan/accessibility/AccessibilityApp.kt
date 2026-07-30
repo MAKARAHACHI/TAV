@@ -774,7 +774,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             missedBody = missedTemplate?.let { if (missedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             endedBody = endedTemplate?.let { if (endedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             noAnswerBody = noAnswerTemplate?.let { if (noAnswerCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
-                            signature = signaturePreview,
                             missedCardAttached = missedCardAttached,
                             endedCardAttached = endedCardAttached,
                             noAnswerCardAttached = noAnswerCardAttached,
@@ -911,7 +910,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             title = "אם לא עניתי",
                             kind = MomentEditKind.MISSED,
                             isEnabled = missedMomentEnabled,
-                            signature = signaturePreview,
                             activeBody = missedTemplate?.let { if (missedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -951,7 +949,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             title = "אחרי שדיברנו",
                             kind = MomentEditKind.ENDED,
                             isEnabled = endedMomentEnabled,
-                            signature = signaturePreview,
                             activeBody = endedTemplate?.let { if (endedCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -991,7 +988,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             title = "לא ענו לי",
                             kind = MomentEditKind.NO_ANSWER,
                             isEnabled = noAnswerMomentEnabled,
-                            signature = signaturePreview,
                             activeBody = noAnswerTemplate?.let { if (noAnswerCardAttached) it.body.trim() else MessageComposition.build(it) }.orEmpty(),
                             channelLabel = channelLabel(selectedChannel),
                             availableChannels = FollowUpChannelSettings.available(whatsappAvailability.businessInstalled),
@@ -1100,7 +1096,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         selectedMissedId = selectedMissedId,
                         selectedNoAnswerId = selectedNoAnswerId,
                         preferredWhatsAppPackage = preferredWhatsAppPackage,
-                        signature = signaturePreview,
                         missedCardAttached = missedCardAttached,
                         endedCardAttached = endedCardAttached,
                         noAnswerCardAttached = noAnswerCardAttached,
@@ -1125,7 +1120,6 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         MessageEditorScreen(
                             isEnded = isReminder,
                             body = editingTemplate?.body.orEmpty(),
-                            signature = signaturePreview,
                             // The card preview inside the editor reflects the ended moment's own
                             // per-moment card flag (the add/remove control now lives on the edit page).
                             cardAttached = endedCardAttached,
@@ -1218,7 +1212,6 @@ private fun MomentEditScreen(
     title: String,
     kind: MomentEditKind,
     isEnabled: Boolean,
-    signature: String,
     activeBody: String,
     channelLabel: String,
     availableChannels: List<FollowUpChannel>,
@@ -1307,18 +1300,8 @@ private fun MomentEditScreen(
                             fontSize = 15.sp,
                             lineHeight = 22.sp
                         )
-                        // Card ON ⇒ the card replaces the one-line signature, so the standalone
-                        // signature is not drawn (preview == sent).
-                        if (!(cardAttached && cardText.isNotBlank()) && signature.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = signature,
-                                color = Color(0xFF111B21),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp
-                            )
-                        }
+                        // WAVE G: card OFF ⇒ body only, no signature at all anymore (the standalone
+                        // one-line signature is never drawn here — matches the send path).
                         // WYSIWYG: the formatted text card appears here live when this moment's card
                         // toggle is ON, and disappears when it flips OFF — same formatter as send.
                         if (cardAttached && cardText.isNotBlank()) {
@@ -1802,7 +1785,6 @@ private fun HomeScreen(
     missedBody: String,
     endedBody: String,
     noAnswerBody: String,
-    signature: String,
     missedCardAttached: Boolean,
     endedCardAttached: Boolean,
     noAnswerCardAttached: Boolean,
@@ -1909,7 +1891,6 @@ private fun HomeScreen(
             emoji = "📞",
             title = "אם לא עניתי",
             body = missedBody,
-            signature = signature,
             // §2: reflects real capability — "נשלח אוטומטי" only when automatic AND Accessibility on.
             sendMode = missedSendMode,
             enabled = missedEnabled,
@@ -1925,11 +1906,6 @@ private fun HomeScreen(
             emoji = "🤝",
             title = "אחרי שדיברנו",
             body = endedBody,
-            // §2: pass the real signature (same as the other two moments). The send path appends
-            // the signature when the card is OFF, so Home's ended preview must show it too. When the
-            // ended card is ON, the accordion body's cardShown guard suppresses the standalone
-            // signature (card replaces it) — preview stays == sent either way.
-            signature = signature,
             // Ended never auto-sends.
             sendMode = MissedSendModeLabel.MANUAL,
             enabled = endedEnabled,
@@ -1945,7 +1921,6 @@ private fun HomeScreen(
             emoji = "📵",
             title = "לא ענו לי",
             body = noAnswerBody,
-            signature = signature,
             // No-answer never auto-sends.
             sendMode = MissedSendModeLabel.MANUAL,
             enabled = noAnswerEnabled,
@@ -2271,7 +2246,6 @@ private fun HomeAccordionCard(
     emoji: String,
     title: String,
     body: String,
-    signature: String,
     sendMode: String,
     enabled: Boolean,
     active: Boolean,
@@ -2388,20 +2362,8 @@ private fun HomeAccordionCard(
                                 fontSize = 14.sp,
                                 lineHeight = 20.sp
                             )
-                            // Card ON ⇒ the formatted card replaces the one-line signature (name/role/
-                            // phone live in the card), so the standalone signature is not drawn — same
-                            // rule as the edit hero, keeping preview == sent (§2).
-                            val cardShown = card?.text?.isNotBlank() == true
-                            if (!cardShown && signature.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = signature,
-                                    color = Color(0xFF111B21),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    lineHeight = 18.sp
-                                )
-                            }
+                            // WAVE G: card OFF ⇒ body only, no signature at all anymore — the
+                            // standalone signature is never drawn here, matching the send path (§2).
 
                             // Formatted TEXT business card inside the bubble — shown only when this
                             // moment's card toggle is ON. It is the exact text that is also sent
@@ -2553,7 +2515,6 @@ private fun MissedCallPromptScreen(
     selectedMissedId: String,
     selectedNoAnswerId: String,
     preferredWhatsAppPackage: String,
-    signature: String,
     missedCardAttached: Boolean,
     endedCardAttached: Boolean,
     noAnswerCardAttached: Boolean,
@@ -2626,14 +2587,13 @@ private fun MissedCallPromptScreen(
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }
 
-    // The exact text that goes out, built from the SAME pieces the bubble previews (§2). When the
-    // card is attached it REPLACES the one-line signature (name/role/phone live in the card), so
-    // only the body + text card are sent. When the card is off, the one-line signature closes the
-    // body as before. Preview == sent for every moment.
+    // The exact text that goes out, built from the SAME pieces the bubble previews (§2). WAVE G:
+    // card ON ⇒ the formatted text card (name/role/phone live in the card); card OFF ⇒ body only,
+    // no signature at all. Preview == sent for every moment.
     val outgoingMessage = if (cardOn) {
         ContactTextCard.append(resolvedMessage, card)
     } else {
-        SignatureLine.append(resolvedMessage, card)
+        resolvedMessage.trim()
     }
 
     fun send() {
@@ -2737,18 +2697,9 @@ private fun MissedCallPromptScreen(
                                         fontSize = 15.sp,
                                         lineHeight = 22.sp
                                     )
-                                    // Card ON ⇒ the card replaces the one-line signature, so the
-                                    // standalone signature is not drawn (preview == sent).
-                                    if (!cardOn && signature.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Text(
-                                            text = signature,
-                                            color = AccessibilityColors.TextStrong,
-                                            fontSize = 15.sp,
-                                            lineHeight = 22.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                    // WAVE G: card OFF ⇒ body only, no signature at all anymore —
+                                    // the standalone signature is never drawn here, matching the
+                                    // send path below (§2-critical: this sheet is closest to send).
                                     if (cardOn) {
                                         Spacer(modifier = Modifier.height(10.dp))
                                         ContactTextCardBubble(raw = cardText)
