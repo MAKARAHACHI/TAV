@@ -54,6 +54,7 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private val allowedRecipientsStore = AllowedRecipientsStore(context)
     private val contactVerifier = ContactVerifier(context)
     private val workingHoursSettings = WorkingHoursSettings(context)
+    private val whatsAppNumberChecker = WhatsAppNumberChecker(context)
 
     fun handleMissedIncomingCandidate(): MissedCallAutoResponseAction {
         val latestCall = CallLogReader(context).readLatestCall()
@@ -343,6 +344,14 @@ class MissedCallAutoResponseHandler(private val context: Context) {
         now: Long,
         source: String
     ) {
+        // §2 pre-send guard (WAVE H): only for a SAVED number CONFIRMED to lack WhatsApp do we skip
+        // opening and take the honest fallback instead. UNKNOWN (no permission, unsaved, query error)
+        // and HAS_WHATSAPP behave exactly as before — we only ever act on a CONFIRMED absence.
+        if (WhatsAppNumberCheckLogic.shouldTakeNotOnWhatsAppFallback(whatsAppNumberChecker.status(normalizedPhone))) {
+            appendLog(FollowUpActionType.WHATSAPP_NUMBER_NOT_ON_WHATSAPP, now, normalizedPhone, message, source)
+            showNotOnWhatsAppFallback(normalizedPhone, message)
+            return
+        }
         appendLog(FollowUpActionType.WHATSAPP_REPLY_PREPARED, now, normalizedPhone, message, source)
         when (whatsAppReplySender.openPreparedReply(normalizedPhone, message, packageName)) {
             WhatsAppReplyOpenResult.OPENED -> {
@@ -559,6 +568,17 @@ class MissedCallAutoResponseHandler(private val context: Context) {
     private fun showManualFallback(phone: String, message: String) {
         if (!canShowManualFallback(phone, message)) return
         manualReplyNotificationHelper.showManualSmsReply(phone, message)
+    }
+
+    /** Same manual-SMS notification, worded for a SAVED number CONFIRMED to lack WhatsApp (§2). */
+    private fun showNotOnWhatsAppFallback(phone: String, message: String) {
+        if (!canShowManualFallback(phone, message)) return
+        manualReplyNotificationHelper.showManualSmsReply(
+            phone = phone,
+            message = message,
+            contentText = "המספר כנראה לא ב-WhatsApp. אפשר לפתוח SMS ולשלוח ידנית.",
+            bigText = "המספר הזה שמור באנשי הקשר בלי WhatsApp מחובר. אפשר לפתוח SMS ולשלוח ידנית — ההודעה תישלח רק אחרי שתלחצ/י שלח."
+        )
     }
 
     private fun showManualReplyPrompt(phone: String, message: String) {

@@ -77,6 +77,21 @@ class HistoryFeedTest {
     }
 
     @Test
+    fun `confirmed not-on-whatsapp entries are excluded from history and never read as a send`() {
+        val entry = FollowUpLogEntry(
+            actionType = FollowUpActionType.WHATSAPP_NUMBER_NOT_ON_WHATSAPP,
+            timestampEpochMs = epochMsAt(today, 9, 0),
+            messagePreview = "",
+            phone = "972500000000"
+        )
+
+        val rows = HistoryFeed.rows(listOf(entry), zoneId = zone, today = today)
+
+        assertTrue(rows.isEmpty())
+        assertTrue(!FollowUpActionType.WHATSAPP_NUMBER_NOT_ON_WHATSAPP.isClientFacingSend())
+    }
+
+    @Test
     fun `no-answer-sourced send classifies as no-answer moment`() {
         val entry = FollowUpLogEntry(
             actionType = FollowUpActionType.WHATSAPP_AUTO_SENT,

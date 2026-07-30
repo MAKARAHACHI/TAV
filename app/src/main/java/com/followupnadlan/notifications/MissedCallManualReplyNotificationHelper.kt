@@ -42,19 +42,26 @@ class MissedCallManualReplyNotificationHelper(private val context: Context) {
         notificationManager.notify(NOTIFICATION_ID_PROMPT, notification)
     }
 
-    fun showManualSmsReply(phone: String, message: String) {
+    fun showManualSmsReply(
+        phone: String,
+        message: String,
+        contentText: String = "WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית.",
+        bigText: String = "WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית — ההודעה תישלח רק אחרי שתלחצ/י שלח."
+    ) {
         if (phone.isBlank() || message.isBlank()) return
         createChannel()
 
         // Plan §5 (WhatsApp unavailable, SMS-backup off): honest — the message was NOT sent, and the
         // only manual path is opening the SMS composer (user taps send there). "פתח SMS" opens the
-        // composer (logs FALLBACK_SMS_OPENED); "ביטול" just dismisses.
+        // composer (logs FALLBACK_SMS_OPENED); "ביטול" just dismisses. WAVE H: the same notification
+        // is reused (not a new system) when a SAVED number is CONFIRMED to lack WhatsApp — only the
+        // wording differs, via [contentText]/[bigText].
         val smsIntent = createSmsIntent(phone, message)
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("ההודעה לא נשלחה")
-            .setContentText("WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית.")
-            .setStyle(Notification.BigTextStyle().bigText("WhatsApp לא זמין. אפשר לפתוח SMS ולשלוח ידנית — ההודעה תישלח רק אחרי שתלחצ/י שלח."))
+            .setContentText(contentText)
+            .setStyle(Notification.BigTextStyle().bigText(bigText))
             .setContentIntent(smsIntent)
             .addAction(0, "פתח SMS", smsIntent)
             .setAutoCancel(true)
