@@ -196,7 +196,10 @@ class CallDetectionService : Service() {
             phone = phone,
             displayName = displayName,
             message = message,
-            wasAnswered = latestCall.type != FollowUpCallType.Missed && latestCall.durationSeconds > 0L,
+            // WAVE G: title is keyed on TYPE only, never on duration — see
+            // EndedMomentClassifier.wasAnsweredForEndedTitle. NO_ANSWER_OUTGOING keeps its own
+            // correct wording — it never reaches this notification helper at all (offerNoAnswer).
+            wasAnswered = EndedMomentClassifier.wasAnsweredForEndedTitle(latestCall.type),
             // Real call time drives the approval sheet's "לפני {X}" sub-line when the body is tapped.
             callTimestampMillis = latestCall.timestampMillis
         )

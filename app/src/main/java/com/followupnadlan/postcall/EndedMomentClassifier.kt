@@ -33,4 +33,15 @@ object EndedMomentClassifier {
         } else {
             EndedMoment.ENDED
         }
+
+    /**
+     * WAVE G: whether a call routed to the ENDED moment ([classify] returned [EndedMoment.ENDED])
+     * should be TITLED as a real conversation, regardless of [FollowUpCallType.durationSeconds] —
+     * only the platform call-log TYPE decides. The platform itself logs an unanswered incoming call
+     * as [FollowUpCallType.Missed] (independent of duration), so any other type reaching the ENDED
+     * moment connected by definition — a 0-duration answered call must still read as "השיחה
+     * הסתיימה", never "שיחה שלא נענתה". This never applies to NO_ANSWER_OUTGOING: that moment is
+     * classified away from ENDED entirely and never reaches this title logic.
+     */
+    fun wasAnsweredForEndedTitle(type: FollowUpCallType): Boolean = type != FollowUpCallType.Missed
 }
