@@ -300,6 +300,9 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
     var messageEditorTarget by remember { mutableStateOf<MessageEditorTarget?>(null) }
     // The ended journey's in-page contact-card editor.
     var cardEditorOpen by remember { mutableStateOf(false) }
+    // The activity log is reachable from BOTH the Home header clock and system settings. Remember
+    // which, so Back / onBack returns to the screen the user actually came from (Home vs settings).
+    var historyFromHome by remember { mutableStateOf(false) }
     // Bumped after the contact card is edited from the ended journey so the preview reloads.
     var profileRefresh by remember { mutableStateOf(0) }
     // Bumped whenever a recipient store is mutated, so Settings previews recompute.
@@ -650,9 +653,13 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             cardEditorOpen -> { cardEditorOpen = false; profileRefresh++ }
             messageEditorTarget != null -> messageEditorTarget = null
             activePicker != null -> activePicker = null
-            // HISTORY and SUPPORT are reached from SYSTEM_SETTINGS, so Back returns there — every
-            // other modal returns to its parent tab (Home). Matches each screen's own onBack.
-            modal == AccessibilityModal.HISTORY || modal == AccessibilityModal.SUPPORT ->
+            // HISTORY can be opened from the Home header clock OR from SYSTEM_SETTINGS; Back returns
+            // to whichever it came from (matches HistoryScreen's own onBack). SUPPORT is settings-only.
+            modal == AccessibilityModal.HISTORY -> {
+                modal = if (historyFromHome) AccessibilityModal.NONE else AccessibilityModal.SYSTEM_SETTINGS
+                historyFromHome = false
+            }
+            modal == AccessibilityModal.SUPPORT ->
                 modal = AccessibilityModal.SYSTEM_SETTINGS
             // "רק אנשים שאבחר" (ALLOWED_RECIPIENTS) is opened from a moment's audience picker, which
             // REPLACES the edit-page modal. Back must ALWAYS land on Home, never re-open the edit
@@ -823,6 +830,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             // editor via the same boolean that already gates SignatureCardEditorScreen.
                             onEditCard = { cardEditorOpen = true },
                             onOpenSystemSettings = { modal = AccessibilityModal.SYSTEM_SETTINGS },
+                            onOpenHistory = { historyFromHome = true; modal = AccessibilityModal.HISTORY },
                             // "נסה על עצמך": compose the EXACT missed-call message the engine would
                             // send (§2 — same composition), then open WhatsApp to that number with the
                             // message prepared, so the agent sees precisely what a client gets and taps
@@ -1047,7 +1055,7 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                         // the user can flip our service on. State refreshes on resume.
                         onOpenAccessibilitySettings = { context.openAccessibilitySettings() },
                         onOpenSmartRules = { modal = AccessibilityModal.SMART_RULES },
-                        onOpenHistory = { modal = AccessibilityModal.HISTORY },
+                        onOpenHistory = { historyFromHome = false; modal = AccessibilityModal.HISTORY },
                         onOpenSupport = { modal = AccessibilityModal.SUPPORT },
                         onDeleteHistory = { logStore.clear() },
                         onBack = { modal = AccessibilityModal.NONE }
@@ -1055,7 +1063,11 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
 
                     AccessibilityModal.HISTORY -> HistoryScreen(
                         logStore = logStore,
-                        onBack = { modal = AccessibilityModal.SYSTEM_SETTINGS }
+                        // Return to wherever the log was opened from: Home (header clock) or settings.
+                        onBack = {
+                            modal = if (historyFromHome) AccessibilityModal.NONE else AccessibilityModal.SYSTEM_SETTINGS
+                            historyFromHome = false
+                        }
                     )
 
                     AccessibilityModal.SUPPORT -> SupportScreen(
@@ -1800,6 +1812,10 @@ private fun HomeScreen(
     onResolveWarning: () -> Unit,
     onEditCard: () -> Unit,
     onOpenSystemSettings: () -> Unit,
+    // Activity log ("יומן פעילות"), one tap from Home via the header clock icon. The log is
+    // operational info the user checks several times a day — not a setting — so it lives here beside
+    // ⚙️ rather than buried in system settings (it is still reachable from there too).
+    onOpenHistory: () -> Unit,
     // "נסה על עצמך" hook: given a phone number, compose the exact follow-up (§2) and open WhatsApp to
     // it. A "try on yourself" card at the bottom of Home drives this. Nullable only so previews/tests
     // may omit it; in the app it is always supplied.
@@ -1855,16 +1871,33 @@ private fun HomeScreen(
                     )
                 }
             }
-            Icon(
-                AccessibilityIcons.Settings,
-                contentDescription = "הגדרות מערכת",
-                tint = colors.textMuted,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenSystemSettings)
-                    .padding(4.dp)
-                    .size(24.dp)
-            )
+            // Header actions: activity log (clock) + system settings (gear). The log sits first so
+            // it reads as the primary "what happened" affordance, not an afterthought of settings.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    AccessibilityIcons.Schedule,
+                    contentDescription = "יומן פעילות",
+                    tint = colors.textMuted,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onOpenHistory)
+                        .padding(4.dp)
+                        .size(24.dp)
+                )
+                Icon(
+                    AccessibilityIcons.Settings,
+                    contentDescription = "הגדרות מערכת",
+                    tint = colors.textMuted,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onOpenSystemSettings)
+                        .padding(4.dp)
+                        .size(24.dp)
+                )
+            }
         }
 
         // MASTER CARD — the single dark gradient card with the real master kill-switch (WIRING A).
