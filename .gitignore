@@ -21,3 +21,7 @@ out/
 
 # Legacy context-package artifact; canonical skill path is .agents/skills/
 /followup-nadlan-vision-guardian/
+
+# Release signing secrets — NEVER commit
+/keystore.properties
+/keystore/
