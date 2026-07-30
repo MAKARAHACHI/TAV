@@ -88,6 +88,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.followupnadlan.followuplog.FollowUpLogStore
+import com.followupnadlan.missedcall.DebugMissedCallSimulationResult
+import com.followupnadlan.missedcall.DebugMissedCallSimulator
+import com.followupnadlan.missedcall.MissedCallAutoResponseHandler
 import com.followupnadlan.missedcall.MissedCallAutoResponseSettings
 import com.followupnadlan.missedcall.MissedCallResponsePrimaryChannel
 import com.followupnadlan.missedcall.MissedCallWhatsAppMode
@@ -820,7 +823,31 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
                             // "✏️ ערוך פרטים" on the My-Card asset opens the existing global profile
                             // editor via the same boolean that already gates SignatureCardEditorScreen.
                             onEditCard = { cardEditorOpen = true },
-                            onOpenSystemSettings = { modal = AccessibilityModal.SYSTEM_SETTINGS }
+                            onOpenSystemSettings = { modal = AccessibilityModal.SYSTEM_SETTINGS },
+                            // DEBUG-only hook: fire a fake missed call through the REAL engine so a
+                            // device tester can exercise composition/§2/cooldown/prompt without a
+                            // second phone. null in release builds ⇒ the card never renders.
+                            onSimulateMissed = if (com.followupnadlan.BuildConfig.DEBUG) {
+                                { rawNumber ->
+                                    val result = DebugMissedCallSimulator { candidate ->
+                                        MissedCallAutoResponseHandler(appContext)
+                                            .handleMissedIncomingCandidate(candidate)
+                                    }.simulate(rawNumber)
+                                    val message = when (result) {
+                                        DebugMissedCallSimulationResult.TRIGGERED ->
+                                            "סומלצה שיחה שלא נענתה — בדוק את ההתראה/הפרומפט"
+                                        DebugMissedCallSimulationResult.EMPTY_NUMBER ->
+                                            "צריך מספר לבדיקה"
+                                        DebugMissedCallSimulationResult.RELEASE_BUILD_BLOCKED ->
+                                            "זמין רק בגרסת DEBUG"
+                                    }
+                                    undoScope.launch {
+                                        snackbarHostState.showSnackbar(message, withDismissAction = true)
+                                    }
+                                }
+                            } else {
+                                null
+                            }
                         )
                     }
 
@@ -1785,7 +1812,11 @@ private fun HomeScreen(
     onOpenNoAnswerJourney: () -> Unit,
     onResolveWarning: () -> Unit,
     onEditCard: () -> Unit,
-    onOpenSystemSettings: () -> Unit
+    onOpenSystemSettings: () -> Unit,
+    // DEBUG-only test hook. Non-null only in debug builds; when non-null a hidden card at the bottom
+    // of Home lets the tester fire a fake missed call through the real engine (detection excepted).
+    // Never shown in release — the caller passes null there.
+    onSimulateMissed: ((String) -> Unit)? = null
 ) {
     val colors = AccessibilityExtra.colors
     // Which accordion cards are currently open. All start CLOSED; the user expands what they want.
@@ -1920,6 +1951,60 @@ private fun HomeScreen(
             onToggle = onToggleNoAnswer,
             onEdit = onOpenNoAnswerJourney
         )
+
+        // DEBUG-only: fire a fake missed call through the real engine. Present only when the caller
+        // supplied the hook (debug builds). Invisible in release.
+        onSimulateMissed?.let { HomeDebugSimulateCard(onSimulate = it) }
+    }
+}
+
+/**
+ * DEBUG-only test card. Lets the tester type a number and fire a simulated MISSED incoming call that
+ * runs the real [MissedCallAutoResponseHandler] path (composition, §2 preview==sent, cooldown,
+ * recipient rules, the prompt/send) — everything EXCEPT the OS-level RINGING→IDLE detection, which no
+ * app code can fake. Only ever rendered when [HomeScreen] is given a non-null hook (debug builds).
+ */
+@Composable
+private fun HomeDebugSimulateCard(onSimulate: (String) -> Unit) {
+    val colors = AccessibilityExtra.colors
+    var number by remember { mutableStateOf("") }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFFFF7E6),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0B84D)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "🧪 בדיקה (DEBUG בלבד)",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 14.sp,
+                color = colors.heading
+            )
+            Text(
+                "מזריק שיחה-שלא-נענתה דרך המנוע האמיתי — הרכבה/תצוגה/cooldown/prompt. לא בודק את הזיהוי עצמו.",
+                fontSize = 12.sp,
+                color = colors.textMuted
+            )
+            OutlinedTextField(
+                value = number,
+                onValueChange = { number = it },
+                singleLine = true,
+                label = { Text("מספר לבדיקה") },
+                placeholder = { Text("0521234567") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            TextButton(
+                onClick = { onSimulate(number) },
+                enabled = number.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("סמלץ שיחה שלא נענתה", fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
