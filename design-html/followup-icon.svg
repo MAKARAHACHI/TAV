@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 108 108" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    FollowUp app launcher icon (design export).
+    Exact replica of the Android adaptive icon:
+      background = @color/ic_launcher_background (#2F6FE0)
+      foreground = drawable/ic_launcher_foreground (two chat bubbles)
+    Rounded-square (squircle-ish) mask matches the adaptive-icon shape.
+  -->
+  <defs>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="108" height="108" rx="24" ry="24"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Background -->
+    <rect x="0" y="0" width="108" height="108" fill="#2F6FE0"/>
+
+    <!-- Incoming message bubble (white) -->
+    <path fill="#FFFFFF"
+      d="M34,30h40a8,8 0,0 1,8 8v20a8,8 0,0 1,-8 8H50L36,80V66h-2a8,8 0,0 1,-8 -8V38a8,8 0,0 1,8 -8z"/>
+    <!-- Two text lines in the incoming bubble -->
+    <path fill="#2F6FE0"
+      d="M40,42h28v5H40zM40,52h20v5H40z"/>
+    <!-- Written reply bubble (calm green) -->
+    <path fill="#159A5B"
+      d="M58,66h22a6,6 0,0 1,6 6v10a6,6 0,0 1,-6 6h-3l-9,9V88h-10a6,6 0,0 1,-6 -6V72a6,6 0,0 1,6 -6z"/>
+    <path fill="#FFFFFF"
+      d="M62,74h16v4H62zM62,81h11v4H62z"/>
+  </g>
+</svg>
