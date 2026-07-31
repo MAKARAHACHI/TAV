@@ -25,3 +25,6 @@ out/
 # Release signing secrets — NEVER commit
 /keystore.properties
 /keystore/
+
+# Firebase deploy cache
+/.firebase/
