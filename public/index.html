@@ -1,104 +1,253 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>פולואפ — שלא ייפול אף לקוח בין הכיסאות</title>
-  <style>
-    :root {
-      --teal: #17B3A3; --teal-dark: #0f9384; --link: #027EB5; --muted: #54656F;
-      --bg: #F7F9FA; --surface: #FFFFFF; --border: #E3E8EA; --ink: #1c2b33;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg); color: var(--ink); line-height: 1.65; }
-    .wrap { max-width: 620px; margin: 0 auto; padding: 0 18px; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FollowUp - אף לקוח לא נופל בין הכיסאות</title>
 
-    /* hero */
-    .hero { text-align: center; padding: 56px 18px 40px;
-      background: linear-gradient(160deg, #E8F7F4 0%, var(--bg) 100%); }
-    .logo { width: 84px; height: 84px; border-radius: 20px; background: var(--teal);
-      display: inline-flex; align-items: center; justify-content: center; font-size: 44px; color: #fff;
-      margin-bottom: 16px; box-shadow: 0 6px 20px rgba(23,179,163,.3); }
-    .hero h1 { font-size: 30px; line-height: 1.3; margin-bottom: 10px; }
-    .hero .tag { color: var(--muted); font-size: 17px; max-width: 440px; margin: 0 auto 26px; }
-    .cta { display: inline-block; background: var(--teal); color: #fff; text-decoration: none;
-      font-size: 19px; font-weight: 700; padding: 16px 44px; border-radius: 40px;
-      box-shadow: 0 6px 18px rgba(23,179,163,.35); }
-    .cta:active { background: var(--teal-dark); }
-    .cta-note { display:block; color: var(--muted); font-size: 13px; margin-top: 12px; }
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
 
-    section { padding: 40px 0; }
-    h2.sec { text-align: center; font-size: 22px; margin-bottom: 26px; }
-
-    .features { display: grid; gap: 14px; }
-    .feat { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-      padding: 20px; display: flex; gap: 14px; align-items: flex-start; }
-    .feat .ic { font-size: 28px; flex-shrink: 0; line-height: 1.2; }
-    .feat h3 { font-size: 17px; margin-bottom: 3px; }
-    .feat p { color: var(--muted); font-size: 15px; }
-
-    .how { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 24px; }
-    ol.how-list { list-style: none; counter-reset: h; }
-    ol.how-list li { counter-increment: h; position: relative; padding: 10px 40px 10px 4px; }
-    ol.how-list li::before { content: counter(h); position: absolute; right: 0; top: 10px;
-      width: 26px; height: 26px; border-radius: 50%; background: var(--teal); color: #fff;
-      font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-
-    .final { text-align: center; padding: 44px 18px 20px; }
-    footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 0 48px; }
-  </style>
+    <style>
+        :root {
+            --ink: #111b21;
+            --ink-light: #667781;
+            --primary: #3f8cff;
+            --primary-hover: #2970da;
+            --accent: #17b3a3;
+            --bubble-green: #d9fdd3;
+            --chat-bg: #efeae2;
+            --bg-site: #f4f7f6;
+            --surface: #ffffff;
+            --wa-link: #027eb5;
+            --radius-main: 24px;
+            --radius-bubble: 16px 16px 4px 16px;
+            --shadow-soft: 0 10px 30px rgba(17, 27, 33, 0.05);
+            --transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Heebo', sans-serif; color: var(--ink); background-color: var(--bg-site);
+            line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden;
+        }
+        .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+        h1, h2, h3 { line-height: 1.2; }
+        h1 { font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 800; color: #fff; margin-bottom: 20px; }
+        h2 { font-size: 2.2rem; font-weight: 800; margin-bottom: 16px; text-align: center; }
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+            background: var(--primary); color: #fff; text-decoration: none; font-weight: 800; font-size: 1.15rem;
+            padding: 18px 40px; border-radius: 16px; box-shadow: 0 8px 25px rgba(63, 140, 255, 0.3);
+            transition: var(--transition); border: none; cursor: pointer;
+        }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(63, 140, 255, 0.4); }
+        .btn-note { display: block; font-size: 0.9rem; color: #a0aab2; margin-top: 12px; font-weight: 500; }
+        .hero { background: linear-gradient(135deg, var(--ink) 0%, #1e2d24 100%); padding: 80px 0 100px; position: relative; overflow: hidden; }
+        .hero-wrapper { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 60px; }
+        .hero-content { max-width: 600px; }
+        .subtitle { font-size: 1.25rem; font-weight: 400; margin-bottom: 40px; color: #d1d7db; }
+        .hero-mockup {
+            width: 100%; max-width: 300px; aspect-ratio: 9/19; background-color: var(--bg-site);
+            border-radius: 40px; border: 10px solid #000; box-shadow: 0 30px 60px rgba(0,0,0,0.3);
+            position: relative; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .hero-mockup::before {
+            content: ''; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            width: 90px; height: 24px; background: #000; border-radius: 20px; z-index: 10;
+        }
+        .mockup-inner { padding: 40px 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+        .mockup-badge { background: rgba(23,179,163,0.15); color: var(--accent); padding: 6px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; align-self: flex-start; }
+        .mockup-master { background: var(--ink); border-radius: 16px; padding: 16px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .mockup-master div h4 { font-size: 0.9rem; margin-bottom: 2px; }
+        .mockup-master div p { font-size: 0.7rem; color: var(--accent); }
+        .mockup-card { background: #fff; border-radius: 16px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .mockup-card h5 { font-size: 0.85rem; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+        .features { padding: 100px 0; background: var(--surface); }
+        .grid-3 { display: grid; grid-template-columns: 1fr; gap: 30px; margin-top: 50px; }
+        .feature-card {
+            background: var(--bg-site); padding: 40px 30px; border-radius: var(--radius-main);
+            border: 1px solid rgba(0,0,0,0.03); transition: var(--transition); display: flex; flex-direction: column;
+        }
+        .feature-card:hover { box-shadow: var(--shadow-soft); background: #fff; transform: translateY(-5px); }
+        .feature-card h3 { font-size: 1.4rem; font-weight: 800; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+        .feature-card p { color: var(--ink-light); margin-bottom: 30px; font-size: 1.05rem; }
+        .wa-preview {
+            background-color: var(--chat-bg); padding: 20px; border-radius: 20px;
+            background-image: url('data:image/svg+xml;utf8,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="2" cy="2" r="1" fill="rgba(0,0,0,0.04)"/></svg>');
+            margin-top: auto;
+        }
+        .wa-bubble {
+            background: var(--bubble-green); padding: 12px 16px 24px 16px; border-radius: var(--radius-bubble);
+            font-size: 0.95rem; line-height: 1.45; color: var(--ink); position: relative;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.08); white-space: pre-line;
+        }
+        .wa-bubble::before {
+            content: ''; position: absolute; bottom: 0; right: -8px; width: 20px; height: 20px;
+            background: radial-gradient(circle at top right, transparent 50%, var(--bubble-green) 50%);
+            clip-path: polygon(0 100%, 100% 100%, 0 0);
+        }
+        .wa-bold { font-weight: 800; }
+        .wa-link { color: var(--wa-link); text-decoration: underline; }
+        .wa-sub { font-size: 0.8rem; color: #54656f; font-style: italic; }
+        .wa-meta { position: absolute; bottom: 4px; left: 10px; font-size: 0.7rem; color: #667781; }
+        .trust-section { padding: 80px 0; background: var(--bg-site); }
+        .trust-box { background: #fff; border-radius: var(--radius-main); padding: 60px 40px; box-shadow: var(--shadow-soft); text-align: center; max-width: 900px; margin: 0 auto; }
+        .trust-box h2 { margin-bottom: 20px; }
+        .trust-box p { font-size: 1.15rem; color: var(--ink-light); max-width: 600px; margin: 0 auto 40px; }
+        .trust-features { display: grid; grid-template-columns: 1fr; gap: 30px; text-align: right; }
+        .t-feat { display: flex; gap: 16px; align-items: flex-start; }
+        .t-icon { font-size: 2rem; background: var(--bubble-green); width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 16px; flex-shrink: 0; }
+        .t-text h4 { font-size: 1.2rem; font-weight: 800; margin-bottom: 6px; }
+        .t-text p { font-size: 0.95rem; color: var(--ink-light); line-height: 1.5; }
+        .cta-bottom { text-align: center; padding: 100px 0; background: var(--surface); }
+        .apk-note {
+            max-width: 500px; margin: 24px auto 0; font-size: 0.9rem; color: var(--ink-light);
+            background: var(--bg-site); padding: 16px 20px; border-radius: 16px;
+            display: flex; align-items: flex-start; gap: 12px; text-align: right; border: 1px solid #e1e5e8;
+        }
+        footer { text-align: center; padding: 40px; color: #a0aab2; font-size: 0.9rem; background: var(--ink); border-top: 1px solid rgba(255,255,255,0.05); }
+        @media (min-width: 768px) {
+            .hero-wrapper { flex-direction: row; text-align: right; justify-content: space-between; }
+            .hero-content { flex: 1; padding-left: 40px; }
+            .subtitle { margin-inline: 0; }
+            .btn-note { text-align: right; }
+            .grid-3 { grid-template-columns: repeat(3, 1fr); }
+            .trust-features { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
 </head>
 <body>
-  <div class="hero">
-    <div class="logo">💬</div>
-    <h1>פולואפ</h1>
-    <p class="tag">שלא ייפול אף לקוח בין הכיסאות. אחרי כל שיחה — פולואפ מזכיר לך לחזור אליו, בלחיצה אחת בוואטסאפ.</p>
-    <a class="cta" href="install.html">הורדת האפליקציה</a>
-    <span class="cta-note">חינם · לאנדרואיד · מדריך התקנה מלא בפנים</span>
-  </div>
 
-  <div class="wrap">
-    <section>
-      <h2 class="sec">למה פולואפ?</h2>
-      <div class="features">
-        <div class="feat">
-          <div class="ic">📞</div>
-          <div><h3>לא מפספסים אף שיחה</h3><p>שיחה שלא נענתה, שיחה שהסתיימה, לקוח שלא ענה — פולואפ מזהה ומזכיר לך לחזור אליו.</p></div>
+    <header class="hero">
+        <div class="container hero-wrapper">
+            <div class="hero-content">
+                <h1>אף לקוח לא נופל<br>בין הכיסאות.</h1>
+                <p class="subtitle">העוזר האישי שעובד על המכשיר שלך. מזהה מתי פספסת שיחה או סיימת פגישה, ושולח הודעת וואטסאפ עם כרטיס הביקור שלך — בדיוק בזמן הנכון.</p>
+                <a href="install.html" class="btn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    הורדת בטא חינם
+                </a>
+                <span class="btn-note">אנדרואיד · הנתונים על המכשיר שלך · התחברות בקוד וואטסאפ</span>
+            </div>
+
+            <div class="hero-mockup">
+                <div class="mockup-inner">
+                    <div style="font-weight: 800; font-size: 1.2rem;">שלום, דני 👋</div>
+                    <div class="mockup-badge">✨ טיפלנו ב-5 לקוחות היום!</div>
+                    <div class="mockup-master">
+                        <div><h4>זיהוי שיחות פועל ✔</h4><p>הודעות המשך מוכנות</p></div>
+                        <div style="width: 36px; height: 20px; background: var(--accent); border-radius: 20px; position:relative;"><div style="width: 16px; height: 16px; background: white; border-radius: 50%; position: absolute; right: 2px; top: 2px;"></div></div>
+                    </div>
+                    <div class="mockup-card"><h5>📞 אם לא עניתי</h5></div>
+                    <div class="mockup-card"><h5>🤝 אחרי שדיברנו</h5></div>
+                    <div class="mockup-card"><h5>📵 לא ענו לי</h5></div>
+                </div>
+            </div>
         </div>
-        <div class="feat">
-          <div class="ic">💬</div>
-          <div><h3>הודעת המשך בלחיצה</h3><p>הודעה מוכנה, מנוסחת יפה, נפתחת ישר בוואטסאפ עם הלקוח. אתה רק מאשר ושולח.</p></div>
+    </header>
+
+    <section class="features">
+        <div class="container">
+            <h2>שלושה רגעים קריטיים, שלוש תגובות חכמות.</h2>
+
+            <div class="grid-3">
+
+                <div class="feature-card">
+                    <h3><span>📞</span> אם לא עניתי</h3>
+                    <p>לקוח התקשר והיית בדיון? האפליקציה תשלח מיד הודעת הרגעה ותשמור על המוניטין השירותי שלך.</p>
+                    <div class="wa-preview">
+                        <div class="wa-bubble">שלום, לא הספקתי לענות לשיחה כעת. פנייתך חשובה לי. כדי שאוכל לחזור אליך ממוקד, אפשר לכתוב לי כאן בקצרה?
+
+<span class="wa-bold">דני לוי · עו"ד מקרקעין</span>
+                            <div class="wa-meta">10:42</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <h3><span>🤝</span> אחרי שדיברנו</h3>
+                    <p>סיימת שיחה חיובית? שלח בקליק את <strong>כרטיס הביקור הטקסטואלי</strong> שלך, עם לינקים ישירים לביקורות.</p>
+                    <div class="wa-preview">
+                        <div class="wa-bubble"><span class="wa-bold">דני לוי</span> │ <span class="wa-bold">עורך דין ומגשר</span>
+
+שמחתי לשוחח איתך.
+
+⭐ <span class="wa-bold">ביקורות וחוות דעת:</span>
+<span class="wa-link">https://domain.co.il</span>
+
+📱 <span class="wa-bold">לשמירה מהירה בטלפון:</span>
+<span class="wa-link">052-1234567</span>
+<span class="wa-sub">*(לחצו על המספר > הוספה)*</span>
+                            <div class="wa-meta">11:05</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <h3><span>📵</span> לא ענו לי</h3>
+                    <p>ניסית להשיג לקוח והוא לא ענה? תן לאפליקציה להשאיר עבורך הודעת וואטסאפ מכבדת שיחזרו אליך.</p>
+                    <div class="wa-preview">
+                        <div class="wa-bubble">ניסיתי להתקשר ולא היית זמין. אשמח שתחזור אליי כשמתפנה 🙏
+
+<span class="wa-bold">דני לוי · עו"ד מקרקעין</span>
+                            <div class="wa-meta">12:30</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </div>
-        <div class="feat">
-          <div class="ic">🪪</div>
-          <div><h3>כרטיס הביקור שלך</h3><p>שם, טלפון ופרטים — מצורפים אוטומטית להודעה, כך שהלקוח תמיד יודע מי פנה אליו.</p></div>
-        </div>
-        <div class="feat">
-          <div class="ic">🔒</div>
-          <div><h3>הנתונים נשארים אצלך</h3><p>הכול עובד על הטלפון שלך. אין CRM מסובך, אין מסד-נתונים חיצוני של הלקוחות.</p></div>
-        </div>
-      </div>
     </section>
 
-    <section>
-      <h2 class="sec">איך זה עובד</h2>
-      <div class="how">
-        <ol class="how-list">
-          <li>מקבל או מסיים שיחה עם לקוח.</li>
-          <li>פולואפ קופץ עם הודעת-המשך מוכנה.</li>
-          <li>אתה מאשר — וההודעה נפתחת בוואטסאפ.</li>
-          <li>שולח. הלקוח מרגיש שרואים אותו.</li>
-        </ol>
-      </div>
+    <section class="trust-section">
+        <div class="container">
+            <div class="trust-box">
+                <h2>אתה תמיד בשליטה מלאה.</h2>
+                <p>האפליקציה היא כלי העבודה שלך. היא עושה עבורך את העבודה השחורה, אבל אתה זה שמחליט מה יוצא החוצה.</p>
+
+                <div class="trust-features">
+                    <div class="t-feat">
+                        <div class="t-icon">✅</div>
+                        <div class="t-text">
+                            <h4>אישור ידני לפני שליחה</h4>
+                            <p>לא רוצה בוט אוטומטי? המערכת תכין את ההודעה, תקפיץ לך התראה קצרה עם התצוגה הסופית, ותמתין לאישור שלך ("שלח" או "לא עכשיו").</p>
+                        </div>
+                    </div>
+                    <div class="t-feat">
+                        <div class="t-icon">🛡️</div>
+                        <div class="t-text">
+                            <h4>הנתונים נשארים על המכשיר</h4>
+                            <p>ההודעות והלקוחות נשמרים מקומית על הטלפון שלך — לא ב-CRM ולא במסד חיצוני. ההתחברות נעשית בקוד חד-פעמי בוואטסאפ, כדי שרק מי שקיבל גישה ישתמש.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </section>
 
-    <div class="final">
-      <a class="cta" href="install.html">הורדה והתקנה</a>
-      <span class="cta-note">כולל מדריך מצולם צעד-אחר-צעד</span>
-    </div>
-  </div>
+    <section class="cta-bottom">
+        <div class="container">
+            <h2>מוכן להפוך לאיש מקצוע שירותי יותר?</h2>
+            <br>
+            <a href="install.html" class="btn">הורדה והתקנה</a>
 
-  <footer>פולואפ · לשאלות פנה למי ששלח לך את הקישור</footer>
+            <div class="apk-note">
+                <div style="font-size: 1.5rem;">⚙️</div>
+                <div>
+                    <strong>הערת התקנה:</strong>
+                    זו גרסת בטא (התקנה ישירה, טרם ב-Google Play). בהתקנה יופיע מסך אבטחה של Play Protect —
+                    זה תקין, ובדף ההורדה יש מדריך מצולם צעד-אחר-צעד שמראה בדיוק איך לאשר.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>FollowUp · כלי עבודה למקצוענים.</p>
+        </div>
+    </footer>
+
 </body>
 </html>
