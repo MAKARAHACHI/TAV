@@ -91,6 +91,31 @@
         .wa-link { color: var(--wa-link); text-decoration: underline; }
         .wa-sub { font-size: 0.8rem; color: #54656f; font-style: italic; }
         .wa-meta { position: absolute; bottom: 4px; left: 10px; font-size: 0.7rem; color: #667781; }
+        /* contact-card block inside the ended bubble */
+        .wa-card-head { font-weight: 800; }
+        .wa-card-sep { color: var(--ink-light); }
+        .wa-card-label { font-weight: 800; }
+        .wa-hint { font-size: 0.8rem; color: #54656f; font-style: italic; }
+        .save-chip {
+            display: inline-flex; align-items: center; gap: 8px; margin-top: 12px;
+            background: #fff; color: var(--wa-link); border: 1px solid #cfe6ef;
+            border-radius: 22px; padding: 8px 16px; font-size: 0.85rem; font-weight: 700;
+            cursor: pointer; transition: var(--transition); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+        }
+        .save-chip:hover { background: #f0f9fc; }
+        .save-chip.saved { background: var(--bubble-green); color: #0a6b33; border-color: #b7ecad; }
+        .save-chip .chk { display: none; }
+        .save-chip.saved .chk { display: inline; }
+        .save-chip.saved .plus { display: none; }
+        /* collapsible scenario cards */
+        .feature-card { cursor: pointer; }
+        .feature-card h3 { justify-content: space-between; }
+        .feature-card h3 .chev { margin-inline-start: auto; transition: transform 0.3s ease; font-size: 1rem; color: var(--ink-light); }
+        .feature-card.open h3 .chev { transform: rotate(180deg); }
+        .feature-card .reveal { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.4s ease, opacity 0.3s ease, margin 0.3s ease; margin-top: 0; }
+        .feature-card.open .reveal { max-height: 900px; opacity: 1; margin-top: 8px; }
+        .tap-hint { font-size: 0.85rem; color: var(--accent); font-weight: 700; margin-top: auto; }
+        .feature-card.open .tap-hint { display: none; }
         .trust-section { padding: 80px 0; background: var(--bg-site); }
         .trust-box { background: #fff; border-radius: var(--radius-main); padding: 60px 40px; box-shadow: var(--shadow-soft); text-align: center; max-width: 900px; margin: 0 auto; }
         .trust-box h2 { margin-bottom: 20px; }
@@ -133,7 +158,7 @@
 
             <div class="hero-mockup">
                 <div class="mockup-inner">
-                    <div style="font-weight: 800; font-size: 1.2rem;">שלום 👋</div>
+                    <div style="font-weight: 800; font-size: 1.2rem;">שלום, דוד 👋</div>
                     <div class="mockup-badge">✨ פולואפ פעיל — לא מפספסים אף שיחה</div>
                     <div class="mockup-master">
                         <div><h4>פולואפ פעיל ✔</h4><p>הודעות המשך מוכנות</p></div>
@@ -151,36 +176,59 @@
         <div class="container">
             <h2>שלושה רגעים קריטיים, שלוש תגובות חכמות.</h2>
 
+            <p style="text-align:center; color:var(--ink-light); margin-top:-8px; margin-bottom:8px;">לחצו על כל תרחיש כדי לראות את ההודעה 👇</p>
+
             <div class="grid-3">
 
-                <div class="feature-card">
-                    <h3><span>📞</span> אם לא עניתי</h3>
+                <div class="feature-card" onclick="toggleCard(this)">
+                    <h3><span>📞 אם לא עניתי</span><span class="chev">⌄</span></h3>
                     <p>לקוח התקשר והיית בדיון? פולואפ מכין הודעת המשך מכבדת — ואפשר להגדיר שתישלח אליו אוטומטית, כדי שידע שקיבלת את הפנייה.</p>
-                    <div class="wa-preview">
-                        <div class="wa-bubble">תודה שהתקשרת, אני כרגע לא פנוי. אחזור אליך ברגע שאתפנה.
-                            <div class="wa-meta">10:42</div>
+                    <span class="tap-hint">↓ הצג הודעה לדוגמה</span>
+                    <div class="reveal">
+                        <div class="wa-preview">
+                            <div class="wa-bubble">היי, ראיתי שחיפשת אותי ואני כרגע לא זמין לענות. אפשר לכתוב לי כאן בקצרה במה מדובר כדי שאחזור אליך מוכן? אשוב אליך בהקדם.
+                                <div class="wa-meta">10:42</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="feature-card">
-                    <h3><span>🤝</span> אחרי שדיברנו</h3>
-                    <p>סיימת שיחה חיובית? בלחיצה אחת פולואפ שולח הודעת סיכום קצרה, ומצרף אליה אוטומטית את הקישורים שהגדרת (אתר / כרטיס דיגיטלי).</p>
-                    <div class="wa-preview">
-                        <div class="wa-bubble">תודה על השיחה! שמח שדיברנו. מצרף את הפרטים שלי:
+                <div class="feature-card" onclick="toggleCard(this)">
+                    <h3><span>🤝 אחרי שדיברנו</span><span class="chev">⌄</span></h3>
+                    <p>סיימת שיחה חיובית? בלחיצה אחת פולואפ שולח הודעת סיכום חמה, ומצרף אליה את כרטיס-הביקור שלך — קישור לביקורות ומספר לשמירה מהירה.</p>
+                    <span class="tap-hint">↓ הצג הודעה + כרטיס ביקור</span>
+                    <div class="reveal">
+                        <div class="wa-preview">
+                            <div class="wa-bubble">היה נעים לדבר! לכל שאלה, התייעצות או מחשבה נוספת שעולה – זה המספר הישיר שלי בוואטסאפ, תרגיש חופשי לסמס.
+מצרף כאן קישור עם קצת יותר מידע עלינו:
 
+<span class="wa-card-head">דוד ישראלי</span> <span class="wa-card-sep">│</span> <span class="wa-card-head">עורך דין מקרקעין</span>
+
+⭐ <span class="wa-card-label">חוות דעת וביקורות:</span>
 <span class="wa-link">https://your-site.co.il</span>
-                            <div class="wa-meta">11:05</div>
+
+📱 <span class="wa-card-label">לשמירה מהירה באנשי הקשר:</span>
+<span class="wa-link">052-1234567</span>
+<span class="wa-hint">(לחצו על המספר ← הוספה לאנשי קשר)</span>
+                                <div class="wa-meta">11:05</div>
+                            </div>
+                            <button class="save-chip" onclick="event.stopPropagation(); saveContact(this)">
+                                <span class="plus">＋ הוספת דוד ישראלי לאנשי הקשר</span>
+                                <span class="chk">✓ נשמר באנשי הקשר</span>
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <div class="feature-card">
-                    <h3><span>📵</span> לא ענו לי</h3>
-                    <p>ניסית להשיג לקוח והוא לא ענה? פולואפ מכין עבורך הודעת וואטסאפ מכבדת, שתשאיר בקליק כדי שיחזרו אליך.</p>
-                    <div class="wa-preview">
-                        <div class="wa-bubble">ניסיתי להתקשר ולא ענית, אשמח שתחזור אליי 🙏
-                            <div class="wa-meta">12:30</div>
+                <div class="feature-card" onclick="toggleCard(this)">
+                    <h3><span>📵 לא ענו לי</span><span class="chev">⌄</span></h3>
+                    <p>ניסית להשיג לקוח והוא לא ענה? פולואפ מכין עבורך הודעת וואטסאפ אנושית ומשחררת-לחץ, שתשאיר בקליק כדי שיחזרו אליך.</p>
+                    <span class="tap-hint">↓ הצג הודעה לדוגמה</span>
+                    <div class="reveal">
+                        <div class="wa-preview">
+                            <div class="wa-bubble">היי, ניסיתי לתפוס אותך הרגע בטלפון. אין שום לחץ, מוזמן לחזור אליי או לכתוב לי כאן כשיהיה לך נוח 🙏
+                                <div class="wa-meta">12:30</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -237,6 +285,15 @@
             <p>FollowUp · כלי עבודה למקצוענים.</p>
         </div>
     </footer>
+
+    <script>
+        function toggleCard(el) {
+            el.classList.toggle('open');
+        }
+        function saveContact(btn) {
+            btn.classList.add('saved');
+        }
+    </script>
 
 </body>
 </html>
