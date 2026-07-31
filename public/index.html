@@ -91,6 +91,41 @@
         .wa-link { color: var(--wa-link); text-decoration: underline; }
         .wa-sub { font-size: 0.8rem; color: #54656f; font-style: italic; }
         .wa-meta { position: absolute; bottom: 4px; left: 10px; font-size: 0.7rem; color: #667781; }
+        /* ===== hero animated call demo ===== */
+        .demo-stage { position: absolute; inset: 34px 0 0; display: flex; flex-direction: column; }
+        .scene { position: absolute; inset: 0; opacity: 0; transition: opacity 0.5s ease; display: flex; flex-direction: column; pointer-events: none; }
+        .scene.on { opacity: 1; }
+        /* scene 1 — incoming call */
+        .call-scene { background: linear-gradient(160deg, #1e2d24, #111b21); color: #fff; align-items: center; justify-content: space-between; padding: 40px 20px 34px; }
+        .call-status { font-size: 0.8rem; color: #9fd8d0; letter-spacing: 0.5px; }
+        .call-status.ring { animation: blink 1s steps(1) infinite; }
+        @keyframes blink { 50% { opacity: 0.35; } }
+        .call-avatar { width: 88px; height: 88px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 2.4rem; margin-bottom: 12px; box-shadow: 0 0 0 0 rgba(23,179,163,0.6); animation: ripple 1.6s ease-out infinite; }
+        @keyframes ripple { 0% { box-shadow: 0 0 0 0 rgba(23,179,163,0.5); } 100% { box-shadow: 0 0 0 26px rgba(23,179,163,0); } }
+        .call-name { font-size: 1.35rem; font-weight: 800; }
+        .call-sub { font-size: 0.85rem; color: #b8c2c0; margin-top: 2px; }
+        .call-actions { display: flex; gap: 40px; margin-top: 8px; }
+        .call-btn { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+        .call-btn.decline { background: #e5484d; }
+        .call-btn.answer { background: #17b3a3; }
+        /* scene 2 — missed + followup working */
+        .miss-scene { background: var(--bg-site); color: var(--ink); align-items: center; justify-content: center; gap: 18px; padding: 24px; text-align: center; }
+        .miss-icon { width: 64px; height: 64px; border-radius: 50%; background: #ffe3e3; color: #e5484d; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; }
+        .miss-title { font-weight: 800; font-size: 1.05rem; }
+        .miss-sub { font-size: 0.85rem; color: var(--ink-light); }
+        .fu-toast { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--border, #e3e8ea); border-radius: 14px; padding: 12px 16px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); font-size: 0.85rem; font-weight: 700; }
+        .fu-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 0.9s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { transform: scale(0.6); opacity: 0.5; } 50% { transform: scale(1); opacity: 1; } }
+        /* scene 3 — whatsapp auto-sent */
+        .wa-scene { background: var(--chat-bg); background-image: url('data:image/svg+xml;utf8,<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="2" cy="2" r="1" fill="rgba(0,0,0,0.04)"/></svg>'); padding: 0; }
+        .wa-topbar { background: #008069; color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 0.9rem; }
+        .wa-topbar .ava { width: 30px; height: 30px; border-radius: 50%; background: #ffffff33; display: flex; align-items: center; justify-content: center; }
+        .wa-body { flex: 1; padding: 16px 14px; display: flex; flex-direction: column; justify-content: flex-end; }
+        .auto-badge { align-self: center; background: #fff6d6; color: #7a5b00; font-size: 0.72rem; font-weight: 700; padding: 4px 12px; border-radius: 20px; margin-bottom: 12px; }
+        .demo-bubble { background: var(--bubble-green); padding: 10px 12px 18px; border-radius: 12px 12px 4px 12px; font-size: 0.82rem; line-height: 1.4; position: relative; box-shadow: 0 1px 1px rgba(0,0,0,0.1); opacity: 0; transform: translateY(8px); }
+        .demo-bubble.in { animation: bubbleIn 0.4s ease forwards; }
+        @keyframes bubbleIn { to { opacity: 1; transform: translateY(0); } }
+        .demo-bubble .t { position: absolute; bottom: 3px; left: 8px; font-size: 0.62rem; color: #667781; }
         /* contact-card block inside the ended bubble */
         .wa-card-head { font-weight: 800; }
         .wa-card-sep { color: var(--ink-light); }
@@ -106,16 +141,13 @@
         .save-chip.saved { background: var(--bubble-green); color: #0a6b33; border-color: #b7ecad; }
         .save-chip .chk { display: none; }
         .save-chip.saved .chk { display: inline; }
-        .save-chip.saved .plus { display: none; }
-        /* collapsible scenario cards */
-        .feature-card { cursor: pointer; }
-        .feature-card h3 { justify-content: space-between; }
-        .feature-card h3 .chev { margin-inline-start: auto; transition: transform 0.3s ease; font-size: 1rem; color: var(--ink-light); }
-        .feature-card.open h3 .chev { transform: rotate(180deg); }
-        .feature-card .reveal { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.4s ease, opacity 0.3s ease, margin 0.3s ease; margin-top: 0; }
-        .feature-card.open .reveal { max-height: 900px; opacity: 1; margin-top: 8px; }
-        .tap-hint { font-size: 0.85rem; color: var(--accent); font-weight: 700; margin-top: auto; }
-        .feature-card.open .tap-hint { display: none; }
+        .save-chip.saved .add { display: none; }
+        /* the removable contact-card block inside the ended bubble */
+        .card-block {
+            overflow: hidden; max-height: 500px; opacity: 1;
+            transition: max-height 0.45s ease, opacity 0.35s ease, margin 0.35s ease;
+        }
+        .card-block.removed { max-height: 0; opacity: 0; }
         .trust-section { padding: 80px 0; background: var(--bg-site); }
         .trust-box { background: #fff; border-radius: var(--radius-main); padding: 60px 40px; box-shadow: var(--shadow-soft); text-align: center; max-width: 900px; margin: 0 auto; }
         .trust-box h2 { margin-bottom: 20px; }
@@ -157,16 +189,43 @@
             </div>
 
             <div class="hero-mockup">
-                <div class="mockup-inner">
-                    <div style="font-weight: 800; font-size: 1.2rem;">שלום, דוד 👋</div>
-                    <div class="mockup-badge">✨ פולואפ פעיל — לא מפספסים אף שיחה</div>
-                    <div class="mockup-master">
-                        <div><h4>פולואפ פעיל ✔</h4><p>הודעות המשך מוכנות</p></div>
-                        <div style="width: 36px; height: 20px; background: var(--accent); border-radius: 20px; position:relative;"><div style="width: 16px; height: 16px; background: white; border-radius: 50%; position: absolute; right: 2px; top: 2px;"></div></div>
+                <div class="demo-stage" id="demoStage">
+
+                    <!-- Scene 1: incoming call -->
+                    <div class="scene call-scene" data-scene="0">
+                        <div class="call-status ring">שיחה נכנסת…</div>
+                        <div style="display:flex;flex-direction:column;align-items:center;">
+                            <div class="call-avatar">👤</div>
+                            <div class="call-name">לקוח פוטנציאלי</div>
+                            <div class="call-sub">נייד · 052-000-0000</div>
+                        </div>
+                        <div class="call-actions">
+                            <div class="call-btn decline">📵</div>
+                            <div class="call-btn answer">📞</div>
+                        </div>
                     </div>
-                    <div class="mockup-card"><h5>📞 אם לא עניתי</h5></div>
-                    <div class="mockup-card"><h5>🤝 אחרי שדיברנו</h5></div>
-                    <div class="mockup-card"><h5>📵 לא ענו לי</h5></div>
+
+                    <!-- Scene 2: missed + FollowUp working -->
+                    <div class="scene miss-scene" data-scene="1">
+                        <div class="miss-icon">📵</div>
+                        <div>
+                            <div class="miss-title">שיחה שלא נענתה</div>
+                            <div class="miss-sub">לקוח פוטנציאלי · לפני רגע</div>
+                        </div>
+                        <div class="fu-toast"><span class="fu-dot"></span> פולואפ מכין ושולח הודעה…</div>
+                    </div>
+
+                    <!-- Scene 3: WhatsApp auto-sent -->
+                    <div class="scene wa-scene" data-scene="2">
+                        <div class="wa-topbar"><span class="ava">👤</span> לקוח פוטנציאלי</div>
+                        <div class="wa-body">
+                            <div class="auto-badge">✓ נשלח אוטומטית על-ידי פולואפ</div>
+                            <div class="demo-bubble">היי, ראיתי שחיפשת אותי ואני כרגע לא זמין לענות. אפשר לכתוב לי כאן בקצרה במה מדובר כדי שאחזור אליך מוכן? אשוב אליך בהקדם.
+                                <span class="t">10:42</span>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -176,31 +235,24 @@
         <div class="container">
             <h2>שלושה רגעים קריטיים, שלוש תגובות חכמות.</h2>
 
-            <p style="text-align:center; color:var(--ink-light); margin-top:-8px; margin-bottom:8px;">לחצו על כל תרחיש כדי לראות את ההודעה 👇</p>
-
             <div class="grid-3">
 
-                <div class="feature-card" onclick="toggleCard(this)">
-                    <h3><span>📞 אם לא עניתי</span><span class="chev">⌄</span></h3>
+                <div class="feature-card">
+                    <h3><span>📞 אם לא עניתי</span></h3>
                     <p>לקוח התקשר והיית בדיון? פולואפ מכין הודעת המשך מכבדת — ואפשר להגדיר שתישלח אליו אוטומטית, כדי שידע שקיבלת את הפנייה.</p>
-                    <span class="tap-hint">↓ הצג הודעה לדוגמה</span>
-                    <div class="reveal">
-                        <div class="wa-preview">
-                            <div class="wa-bubble">היי, ראיתי שחיפשת אותי ואני כרגע לא זמין לענות. אפשר לכתוב לי כאן בקצרה במה מדובר כדי שאחזור אליך מוכן? אשוב אליך בהקדם.
-                                <div class="wa-meta">10:42</div>
-                            </div>
+                    <div class="wa-preview">
+                        <div class="wa-bubble">היי, ראיתי שחיפשת אותי ואני כרגע לא זמין לענות. אפשר לכתוב לי כאן בקצרה במה מדובר כדי שאחזור אליך מוכן? אשוב אליך בהקדם.
+                            <div class="wa-meta">10:42</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="feature-card" onclick="toggleCard(this)">
-                    <h3><span>🤝 אחרי שדיברנו</span><span class="chev">⌄</span></h3>
+                <div class="feature-card">
+                    <h3><span>🤝 אחרי שדיברנו</span></h3>
                     <p>סיימת שיחה חיובית? בלחיצה אחת פולואפ שולח הודעת סיכום חמה, ומצרף אליה את כרטיס-הביקור שלך — קישור לביקורות ומספר לשמירה מהירה.</p>
-                    <span class="tap-hint">↓ הצג הודעה + כרטיס ביקור</span>
-                    <div class="reveal">
-                        <div class="wa-preview">
-                            <div class="wa-bubble">היה נעים לדבר! לכל שאלה, התייעצות או מחשבה נוספת שעולה – זה המספר הישיר שלי בוואטסאפ, תרגיש חופשי לסמס.
-מצרף כאן קישור עם קצת יותר מידע עלינו:
+                    <div class="wa-preview">
+                        <div class="wa-bubble">היה נעים לדבר! לכל שאלה, התייעצות או מחשבה נוספת שעולה – זה המספר הישיר שלי בוואטסאפ, תרגיש חופשי לסמס.
+מצרף כאן קישור עם קצת יותר מידע עלינו:<span class="card-block">
 
 <span class="wa-card-head">דוד ישראלי</span> <span class="wa-card-sep">│</span> <span class="wa-card-head">עורך דין מקרקעין</span>
 
@@ -209,26 +261,22 @@
 
 📱 <span class="wa-card-label">לשמירה מהירה באנשי הקשר:</span>
 <span class="wa-link">052-1234567</span>
-<span class="wa-hint">(לחצו על המספר ← הוספה לאנשי קשר)</span>
-                                <div class="wa-meta">11:05</div>
-                            </div>
-                            <button class="save-chip" onclick="event.stopPropagation(); saveContact(this)">
-                                <span class="plus">＋ הוספת דוד ישראלי לאנשי הקשר</span>
-                                <span class="chk">✓ נשמר באנשי הקשר</span>
-                            </button>
+<span class="wa-hint">(לחצו על המספר ← הוספה לאנשי קשר)</span></span>
+                            <div class="wa-meta">11:05</div>
                         </div>
+                        <button class="save-chip saved" onclick="toggleContactCard(this)">
+                            <span class="add">＋ הוספת כרטיס הביקור</span>
+                            <span class="chk">✓ הכרטיס צורף — הסרה</span>
+                        </button>
                     </div>
                 </div>
 
-                <div class="feature-card" onclick="toggleCard(this)">
-                    <h3><span>📵 לא ענו לי</span><span class="chev">⌄</span></h3>
+                <div class="feature-card">
+                    <h3><span>📵 לא ענו לי</span></h3>
                     <p>ניסית להשיג לקוח והוא לא ענה? פולואפ מכין עבורך הודעת וואטסאפ אנושית ומשחררת-לחץ, שתשאיר בקליק כדי שיחזרו אליך.</p>
-                    <span class="tap-hint">↓ הצג הודעה לדוגמה</span>
-                    <div class="reveal">
-                        <div class="wa-preview">
-                            <div class="wa-bubble">היי, ניסיתי לתפוס אותך הרגע בטלפון. אין שום לחץ, מוזמן לחזור אליי או לכתוב לי כאן כשיהיה לך נוח 🙏
-                                <div class="wa-meta">12:30</div>
-                            </div>
+                    <div class="wa-preview">
+                        <div class="wa-bubble">היי, ניסיתי לתפוס אותך הרגע בטלפון. אין שום לחץ, מוזמן לחזור אליי או לכתוב לי כאן כשיהיה לך נוח 🙏
+                            <div class="wa-meta">12:30</div>
                         </div>
                     </div>
                 </div>
@@ -287,11 +335,32 @@
     </footer>
 
     <script>
-        function toggleCard(el) {
-            el.classList.toggle('open');
-        }
-        function saveContact(btn) {
-            btn.classList.add('saved');
+        // Hero call-demo loop: ring → missed+working → whatsapp auto-sent → repeat
+        (function () {
+            var stage = document.getElementById('demoStage');
+            if (!stage) return;
+            var scenes = stage.querySelectorAll('.scene');
+            var bubble = stage.querySelector('.demo-bubble');
+            var i = 0;
+            // ring 3.2s, missed/working 2.4s, whatsapp 4s
+            var durations = [3200, 2400, 4000];
+            function show(n) {
+                scenes.forEach(function (s, idx) { s.classList.toggle('on', idx === n); });
+                if (n === 2 && bubble) {
+                    bubble.classList.remove('in');
+                    void bubble.offsetWidth; // restart animation
+                    setTimeout(function () { bubble.classList.add('in'); }, 500);
+                }
+                setTimeout(function () { i = (n + 1) % scenes.length; show(i); }, durations[n]);
+            }
+            show(0);
+        })();
+
+        function toggleContactCard(btn) {
+            btn.classList.toggle('saved');
+            var bubble = btn.closest('.wa-preview').querySelector('.wa-bubble');
+            var card = bubble.querySelector('.card-block');
+            if (card) card.classList.toggle('removed', !btn.classList.contains('saved'));
         }
     </script>
 
