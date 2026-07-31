@@ -3,138 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>פולואפ — הורדה והתקנה</title>
+  <title>פולואפ — שלא ייפול אף לקוח בין הכיסאות</title>
   <style>
     :root {
-      --teal: #17B3A3;
-      --teal-dark: #0f9384;
-      --link: #027EB5;
-      --muted: #54656F;
-      --bg: #F7F9FA;
-      --surface: #FFFFFF;
-      --border: #E3E8EA;
-      --warn-bg: #FFF6E5;
-      --warn-border: #F0C36D;
+      --teal: #17B3A3; --teal-dark: #0f9384; --link: #027EB5; --muted: #54656F;
+      --bg: #F7F9FA; --surface: #FFFFFF; --border: #E3E8EA; --ink: #1c2b33;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg); color: #1c2b33; line-height: 1.6;
-      padding: 24px 16px 64px;
-    }
-    .wrap { max-width: 560px; margin: 0 auto; }
-    header { text-align: center; margin-bottom: 28px; }
-    .logo {
-      width: 72px; height: 72px; border-radius: 18px; background: var(--teal);
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 38px; color: #fff; margin-bottom: 12px;
-    }
-    h1 { font-size: 26px; margin-bottom: 4px; }
-    .sub { color: var(--muted); font-size: 15px; }
-    .download {
-      display: block; width: 100%; text-align: center;
-      background: var(--teal); color: #fff; text-decoration: none;
-      font-size: 19px; font-weight: 700; padding: 18px; border-radius: 14px;
-      margin: 24px 0; box-shadow: 0 4px 14px rgba(23,179,163,.3);
-    }
-    .download:active { background: var(--teal-dark); }
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 20px; margin-bottom: 18px;
-    }
-    .card h2 { font-size: 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-    .warn {
-      background: var(--warn-bg); border: 1px solid var(--warn-border);
-      border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; font-size: 15px;
-    }
-    .warn b { color: #8a6100; }
-    ol.steps { list-style: none; counter-reset: s; }
-    ol.steps li {
-      counter-increment: s; position: relative;
-      padding: 12px 44px 12px 8px; border-bottom: 1px solid var(--border);
-    }
-    ol.steps li:last-child { border-bottom: none; }
-    ol.steps li::before {
-      content: counter(s); position: absolute; right: 0; top: 12px;
-      width: 30px; height: 30px; border-radius: 50%;
-      background: var(--teal); color: #fff; font-weight: 700;
-      display: flex; align-items: center; justify-content: center; font-size: 15px;
-    }
-    ol.steps b { color: #0f9384; }
-    .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
-    ol.img-steps li { padding-bottom: 16px; }
-    ol.img-steps img {
-      display: block; width: 100%; max-width: 260px; height: auto;
-      margin: 10px 0 2px; border: 1px solid var(--border); border-radius: 12px;
-    }
-    footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 28px; }
-    .pill { display:inline-block; background:#E8F7F4; color:var(--teal-dark); border-radius:20px; padding:4px 12px; font-size:13px; margin-top:8px; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg); color: var(--ink); line-height: 1.65; }
+    .wrap { max-width: 620px; margin: 0 auto; padding: 0 18px; }
+
+    /* hero */
+    .hero { text-align: center; padding: 56px 18px 40px;
+      background: linear-gradient(160deg, #E8F7F4 0%, var(--bg) 100%); }
+    .logo { width: 84px; height: 84px; border-radius: 20px; background: var(--teal);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 44px; color: #fff;
+      margin-bottom: 16px; box-shadow: 0 6px 20px rgba(23,179,163,.3); }
+    .hero h1 { font-size: 30px; line-height: 1.3; margin-bottom: 10px; }
+    .hero .tag { color: var(--muted); font-size: 17px; max-width: 440px; margin: 0 auto 26px; }
+    .cta { display: inline-block; background: var(--teal); color: #fff; text-decoration: none;
+      font-size: 19px; font-weight: 700; padding: 16px 44px; border-radius: 40px;
+      box-shadow: 0 6px 18px rgba(23,179,163,.35); }
+    .cta:active { background: var(--teal-dark); }
+    .cta-note { display:block; color: var(--muted); font-size: 13px; margin-top: 12px; }
+
+    section { padding: 40px 0; }
+    h2.sec { text-align: center; font-size: 22px; margin-bottom: 26px; }
+
+    .features { display: grid; gap: 14px; }
+    .feat { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 20px; display: flex; gap: 14px; align-items: flex-start; }
+    .feat .ic { font-size: 28px; flex-shrink: 0; line-height: 1.2; }
+    .feat h3 { font-size: 17px; margin-bottom: 3px; }
+    .feat p { color: var(--muted); font-size: 15px; }
+
+    .how { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 24px; }
+    ol.how-list { list-style: none; counter-reset: h; }
+    ol.how-list li { counter-increment: h; position: relative; padding: 10px 40px 10px 4px; }
+    ol.how-list li::before { content: counter(h); position: absolute; right: 0; top: 10px;
+      width: 26px; height: 26px; border-radius: 50%; background: var(--teal); color: #fff;
+      font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+    .final { text-align: center; padding: 44px 18px 20px; }
+    footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 0 48px; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="logo">💬</div>
-      <h1>פולואפ</h1>
-      <div class="sub">מעקב אחרי שיחות ללקוחות — הורדה והתקנה</div>
-    </header>
-
-    <a class="download" href="https://github.com/MAKARAHACHI/TAV/releases/download/v0.1.2/followup.apk">⬇️ הורדת האפליקציה</a>
-
-    <div class="warn">
-      <b>⚠️ חשוב לפני ההתקנה:</b> בזמן ההתקנה יופיע מסך של Google Play Protect
-      שאומר שהאפליקציה "נחסמה". <b>זה תקין</b> — קורה לכל אפליקציה שמותקנת מחוץ
-      לחנות. פשוט עקוב אחרי המדריך למטה כדי לאשר את ההתקנה.
-    </div>
-
-    <div class="card">
-      <h2>📥 שלב 1 — התקנה</h2>
-      <ol class="steps">
-        <li>לחץ על <b>הורדת האפליקציה</b> למעלה.</li>
-        <li>פתח את הקובץ שהורד ולחץ <b>התקן</b>.</li>
-        <li>אם מופיע מסך "נחסמה" — עבור לשלב 2.</li>
-      </ol>
-    </div>
-
-    <div class="card">
-      <h2>🛡️ שלב 2 — אישור ב-Play Protect</h2>
-      <p class="note" style="margin-bottom:8px">רק אם ההתקנה נחסמה. עקוב לפי הסדר:</p>
-      <ol class="steps img-steps">
-        <li>
-          פתח את <b>Play Store</b> ← <b>תמונת הפרופיל</b> ← בחר <b>Play Protect</b>.
-          <img src="guide/1.jpeg" alt="Play Protect בתפריט Play Store" loading="lazy">
-        </li>
-        <li>
-          לחץ על <b>גלגל השיניים ⚙️</b> (בפינה למעלה).
-          <img src="guide/2.jpeg" alt="גלגל השיניים במסך Play Protect" loading="lazy">
-        </li>
-        <li>
-          כבה את המתג <b>"סריקת אפליקציות באמצעות Play Protect"</b>.
-          <img src="guide/3.jpeg" alt="כיבוי מתג הסריקה" loading="lazy">
-        </li>
-        <li>
-          בחלון שיופיע לחץ <b>"השהיה"</b> (לא "השבתה").
-          <img src="guide/4.jpeg" alt="בחירת השהיה בדיאלוג" loading="lazy">
-        </li>
-        <li>חזור והתקן את פולואפ — עכשיו זה יעבור.</li>
-      </ol>
-      <p class="note">אחרי ההתקנה אפשר להדליק את Play Protect בחזרה — היא כבר לא תחסום את פולואפ.</p>
-    </div>
-
-    <div class="card">
-      <h2>🔑 שלב 3 — התחברות</h2>
-      <ol class="steps">
-        <li>פתח את <b>פולואפ</b>.</li>
-        <li>הזן את <b>מספר הטלפון</b> שלך ולחץ "שלח קוד".</li>
-        <li>תקבל <b>קוד בוואטסאפ</b> — הזן אותו ולחץ "אמת".</li>
-        <li>זהו — אתה בפנים.</li>
-      </ol>
-      <div class="pill">הקוד מגיע בוואטסאפ תוך כמה שניות</div>
-    </div>
-
-    <footer>
-      פולואפ · לשאלות פנה למי ששלח לך את הקישור
-    </footer>
+  <div class="hero">
+    <div class="logo">💬</div>
+    <h1>פולואפ</h1>
+    <p class="tag">שלא ייפול אף לקוח בין הכיסאות. אחרי כל שיחה — פולואפ מזכיר לך לחזור אליו, בלחיצה אחת בוואטסאפ.</p>
+    <a class="cta" href="install.html">הורדת האפליקציה</a>
+    <span class="cta-note">חינם · לאנדרואיד · מדריך התקנה מלא בפנים</span>
   </div>
+
+  <div class="wrap">
+    <section>
+      <h2 class="sec">למה פולואפ?</h2>
+      <div class="features">
+        <div class="feat">
+          <div class="ic">📞</div>
+          <div><h3>לא מפספסים אף שיחה</h3><p>שיחה שלא נענתה, שיחה שהסתיימה, לקוח שלא ענה — פולואפ מזהה ומזכיר לך לחזור אליו.</p></div>
+        </div>
+        <div class="feat">
+          <div class="ic">💬</div>
+          <div><h3>הודעת המשך בלחיצה</h3><p>הודעה מוכנה, מנוסחת יפה, נפתחת ישר בוואטסאפ עם הלקוח. אתה רק מאשר ושולח.</p></div>
+        </div>
+        <div class="feat">
+          <div class="ic">🪪</div>
+          <div><h3>כרטיס הביקור שלך</h3><p>שם, טלפון ופרטים — מצורפים אוטומטית להודעה, כך שהלקוח תמיד יודע מי פנה אליו.</p></div>
+        </div>
+        <div class="feat">
+          <div class="ic">🔒</div>
+          <div><h3>הנתונים נשארים אצלך</h3><p>הכול עובד על הטלפון שלך. אין CRM מסובך, אין מסד-נתונים חיצוני של הלקוחות.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="sec">איך זה עובד</h2>
+      <div class="how">
+        <ol class="how-list">
+          <li>מקבל או מסיים שיחה עם לקוח.</li>
+          <li>פולואפ קופץ עם הודעת-המשך מוכנה.</li>
+          <li>אתה מאשר — וההודעה נפתחת בוואטסאפ.</li>
+          <li>שולח. הלקוח מרגיש שרואים אותו.</li>
+        </ol>
+      </div>
+    </section>
+
+    <div class="final">
+      <a class="cta" href="install.html">הורדה והתקנה</a>
+      <span class="cta-note">כולל מדריך מצולם צעד-אחר-צעד</span>
+    </div>
+  </div>
+
+  <footer>פולואפ · לשאלות פנה למי ששלח לך את הקישור</footer>
 </body>
 </html>

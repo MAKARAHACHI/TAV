@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>פולואפ — הורדה והתקנה</title>
+  <style>
+    :root {
+      --teal: #17B3A3; --teal-dark: #0f9384; --link: #027EB5; --muted: #54656F;
+      --bg: #F7F9FA; --surface: #FFFFFF; --border: #E3E8EA;
+      --warn-bg: #FFF6E5; --warn-border: #F0C36D;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg); color: #1c2b33; line-height: 1.6; padding: 24px 16px 64px; }
+    .wrap { max-width: 560px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 24px; }
+    .logo { width: 64px; height: 64px; border-radius: 16px; background: var(--teal);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 34px; color: #fff; margin-bottom: 10px; }
+    h1 { font-size: 24px; margin-bottom: 2px; }
+    .sub { color: var(--muted); font-size: 14px; }
+    .download { display: block; width: 100%; text-align: center; background: var(--teal); color: #fff;
+      text-decoration: none; font-size: 19px; font-weight: 700; padding: 18px; border-radius: 14px;
+      margin: 22px 0; box-shadow: 0 4px 14px rgba(23,179,163,.3); }
+    .download:active { background: var(--teal-dark); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 18px; }
+    .card h2 { font-size: 18px; margin-bottom: 12px; }
+    .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 14px;
+      padding: 16px 18px; margin-bottom: 18px; font-size: 15px; }
+    .warn b { color: #8a6100; }
+    ol.steps { list-style: none; counter-reset: s; }
+    ol.steps li { counter-increment: s; position: relative; padding: 12px 44px 12px 8px; border-bottom: 1px solid var(--border); }
+    ol.steps li:last-child { border-bottom: none; }
+    ol.steps li::before { content: counter(s); position: absolute; right: 0; top: 12px;
+      width: 30px; height: 30px; border-radius: 50%; background: var(--teal); color: #fff;
+      font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+    ol.steps b { color: #0f9384; }
+    ol.img-steps li { padding-bottom: 16px; }
+    ol.img-steps img { display: block; width: 100%; max-width: 260px; height: auto;
+      margin: 10px 0 2px; border: 1px solid var(--border); border-radius: 12px; }
+    .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .back { display:inline-block; color: var(--link); text-decoration:none; font-size:14px; margin-bottom:16px; }
+    footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 28px; }
+    .pill { display:inline-block; background:#E8F7F4; color:var(--teal-dark); border-radius:20px; padding:4px 12px; font-size:13px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="index.html">→ חזרה לעמוד הראשי</a>
+    <header>
+      <div class="logo">💬</div>
+      <h1>הורדה והתקנה</h1>
+      <div class="sub">עוקבים אחרי השלבים לפי הסדר</div>
+    </header>
+
+    <a class="download" href="https://github.com/MAKARAHACHI/TAV/releases/download/v0.1.2/followup.apk">⬇️ הורדת האפליקציה</a>
+
+    <div class="warn">
+      <b>⚠️ חשוב:</b> בזמן ההתקנה יופיע מסך של Google Play Protect שאומר שהאפליקציה
+      "נחסמה". <b>זה תקין</b> — קורה לכל אפליקציה שמותקנת מחוץ לחנות. עקוב אחרי המדריך למטה.
+    </div>
+
+    <div class="card">
+      <h2>📥 שלב 1 — התקנה</h2>
+      <ol class="steps">
+        <li>לחץ על <b>הורדת האפליקציה</b> למעלה.</li>
+        <li>פתח את הקובץ שהורד ולחץ <b>התקן</b>.</li>
+        <li>אם מופיע מסך "נחסמה" — עבור לשלב 2.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>🛡️ שלב 2 — אישור ב-Play Protect</h2>
+      <p class="note" style="margin-bottom:8px">רק אם ההתקנה נחסמה. עקוב לפי הסדר:</p>
+      <ol class="steps img-steps">
+        <li>
+          פתח את אפליקציית <b>חנות Play</b>.
+          <img src="guide/1.jpeg" alt="פתיחת חנות Play" loading="lazy">
+        </li>
+        <li>
+          לחץ על <b>תמונת הפרופיל</b> שלך (למעלה).
+          <img src="guide/2.jpeg" alt="לחיצה על תמונת הפרופיל" loading="lazy">
+        </li>
+        <li>
+          בחר <b>Play Protect</b>.
+          <img src="guide/3.jpeg" alt="בחירת Play Protect" loading="lazy">
+        </li>
+        <li>
+          לחץ על <b>גלגל השיניים ⚙️</b> (בפינה למעלה).
+          <img src="guide/4.jpeg" alt="גלגל השיניים במסך Play Protect" loading="lazy">
+        </li>
+        <li>
+          כבה את המתג <b>"סריקת אפליקציות באמצעות Play Protect"</b>.
+          <img src="guide/5.jpeg" alt="כיבוי מתג הסריקה" loading="lazy">
+        </li>
+        <li>
+          בחלון שיופיע לחץ <b>"השהיה"</b> (לא "השבתה").
+          <img src="guide/6.jpeg" alt="בחירת השהיה בדיאלוג" loading="lazy">
+        </li>
+        <li>חזור והתקן את פולואפ — עכשיו זה יעבור.</li>
+      </ol>
+      <p class="note">אחרי ההתקנה אפשר להדליק את Play Protect בחזרה — היא כבר לא תחסום את פולואפ.</p>
+    </div>
+
+    <div class="card">
+      <h2>🔑 שלב 3 — התחברות</h2>
+      <ol class="steps">
+        <li>פתח את <b>פולואפ</b>.</li>
+        <li>הזן את <b>מספר הטלפון</b> שלך ולחץ "שלח קוד".</li>
+        <li>תקבל <b>קוד בוואטסאפ</b> — הזן אותו ולחץ "אמת".</li>
+        <li>זהו — אתה בפנים.</li>
+      </ol>
+      <div class="pill">הקוד מגיע בוואטסאפ תוך כמה שניות</div>
+    </div>
+
+    <footer>פולואפ · לשאלות פנה למי ששלח לך את הקישור</footer>
+  </div>
+</body>
+</html>
