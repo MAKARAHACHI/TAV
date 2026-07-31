@@ -289,6 +289,22 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
 
     var onboardingDone by remember { mutableStateOf(setupPreferences.isSetupCompleted()) }
 
+    // WhatsApp-OTP login gate. Status is derived from the stored token + the clock; LOCKED shows
+    // the login screen, NEEDS_RENEW triggers a silent renew (see LaunchedEffect below).
+    val authTokenStore = remember(context) { com.followupnadlan.auth.AuthTokenStore(appContext) }
+    var authStatus by remember {
+        mutableStateOf(
+            authTokenStore.load().let { s ->
+                com.followupnadlan.auth.OtpGateLogic.evaluate(
+                    hasToken = s.hasToken,
+                    expiresAtMs = s.expiresAtMs,
+                    lastRenewOkMs = s.lastRenewOkMs,
+                    nowMs = System.currentTimeMillis()
+                )
+            }
+        )
+    }
+
     var tab by remember { mutableStateOf(AccessibilityTab.HOME) }
     var modal by remember {
         mutableStateOf(if (missedCallLaunch.fromNotification) AccessibilityModal.MISSED_CALL_PROMPT else AccessibilityModal.NONE)
@@ -669,6 +685,40 @@ fun AccessibilityApp(missedCallLaunch: MissedCallLaunch = MissedCallLaunch()) {
             modal != AccessibilityModal.NONE -> { modal = AccessibilityModal.NONE; recipientsRefresh++ }
             tab != AccessibilityTab.HOME -> tab = AccessibilityTab.HOME
         }
+    }
+
+    // Silent renew: when the token is valid-but-stale (>=24h), refresh it in the background.
+    // Renewed -> back to AUTHENTICATED; Revoked (server 401) -> LOCK; transient NetworkError ->
+    // leave AUTHENTICATED behavior intact (do NOT lock on a flaky connection).
+    LaunchedEffect(authStatus) {
+        if (authStatus == com.followupnadlan.auth.OtpGateStatus.NEEDS_RENEW) {
+            val token = authTokenStore.load().token
+            when (val result = com.followupnadlan.auth.OtpApiClient().renew(token)) {
+                is com.followupnadlan.auth.OtpApiClient.RenewResult.Renewed -> {
+                    authTokenStore.markRenewed(result.token, result.expiresAtMs, System.currentTimeMillis())
+                    authStatus = com.followupnadlan.auth.OtpGateStatus.AUTHENTICATED
+                }
+                is com.followupnadlan.auth.OtpApiClient.RenewResult.Revoked -> {
+                    authTokenStore.markLocked(true)
+                    authStatus = com.followupnadlan.auth.OtpGateStatus.LOCKED
+                }
+                is com.followupnadlan.auth.OtpApiClient.RenewResult.NetworkError -> {
+                    // Transient — treat as authenticated for this session; retry on next launch.
+                    authStatus = com.followupnadlan.auth.OtpGateStatus.AUTHENTICATED
+                }
+            }
+        }
+    }
+
+    if (authStatus == com.followupnadlan.auth.OtpGateStatus.LOCKED) {
+        Surface(modifier = Modifier.fillMaxSize(), color = AccessibilityColors.ScreenBackground) {
+            com.followupnadlan.auth.LoginScreen(
+                authTokenStore = authTokenStore,
+                myDetailsStore = myDetailsStore,
+                onAuthenticated = { authStatus = com.followupnadlan.auth.OtpGateStatus.AUTHENTICATED }
+            )
+        }
+        return
     }
 
     if (!onboardingDone) {
