@@ -49,7 +49,7 @@
         }
         .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
         h1, h2, h3 { line-height: 1.2; }
-        h1 { font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 800; color: #fff; margin-bottom: 20px; }
+        h1 { font-size: clamp(1.8rem, 4.2vw, 2.8rem); font-weight: 800; color: #fff; margin-bottom: 0; line-height: 1.25; letter-spacing: -0.5px; }
         h2 { font-size: 2.2rem; font-weight: 800; margin-bottom: 16px; text-align: center; }
         .btn {
             display: inline-flex; align-items: center; justify-content: center; gap: 10px;
@@ -59,36 +59,37 @@
         }
         .btn:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(63, 140, 255, 0.4); }
         .btn-note { display: block; font-size: 0.9rem; color: #a0aab2; margin-top: 12px; font-weight: 500; }
-        .hero { background: linear-gradient(135deg, var(--ink) 0%, #1e2d24 100%); padding: 80px 0 100px; position: relative; overflow: hidden; }
-        .hero-wrapper { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 60px; }
-        .hero-content { max-width: 600px; }
+        .hero { background: radial-gradient(circle at top center, #1e2d24 0%, var(--ink) 80%); padding: 32px 0 44px; position: relative; overflow: hidden; }
+        .hero-wrapper { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+        .hero-head { max-width: 680px; }
+        .hero-foot { max-width: 620px; }
         .hero-pill {
             display: inline-flex; align-items: center; gap: 6px;
             background: rgba(23, 179, 163, 0.15); color: var(--accent);
             border: 1px solid rgba(23, 179, 163, 0.3);
             padding: 5px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 700;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
         .brand-name { color: var(--primary); font-weight: 800; }
-        .subtitle { font-size: 1.25rem; font-weight: 400; margin-bottom: 40px; color: #d1d7db; }
+        .subtitle { font-size: 1.05rem; font-weight: 400; margin-bottom: 20px; color: #d1d7db; line-height: 1.6; }
         /* 3D floating wrapper + ambient backlight */
         .phone-stage {
             position: relative; display: flex; align-items: center; justify-content: center;
-            perspective: 1200px; padding: 20px 0; width: 100%;
+            perspective: 1000px; padding: 6px 0; width: 100%;
         }
         .phone-wrapper {
             position: relative; z-index: 2; transform-style: preserve-3d;
-            width: 300px; height: 630px; max-width: 82vw;
-            transform: rotateX(6deg) rotateY(-8deg) rotateZ(2deg);
+            width: 240px; height: 500px; max-width: 74vw;
+            transform: rotateX(5deg) rotateY(-4deg) rotateZ(1deg);
             animation: float3D 6s ease-in-out infinite alternate;
         }
         @keyframes float3D {
-            0% { transform: rotateX(6deg) rotateY(-8deg) rotateZ(2deg) translateY(0); }
-            100% { transform: rotateX(8deg) rotateY(-4deg) rotateZ(1deg) translateY(-14px); }
+            0% { transform: rotateX(5deg) rotateY(-4deg) rotateZ(1deg) translateY(0); }
+            100% { transform: rotateX(7deg) rotateY(-1deg) rotateZ(0deg) translateY(-10px); }
         }
         .ambient-glow {
-            position: absolute; width: 360px; height: 480px; max-width: 90%;
-            background: rgba(23,179,163,0.35); filter: blur(90px); border-radius: 50%;
+            position: absolute; width: 300px; height: 380px; max-width: 90%;
+            background: rgba(23,179,163,0.35); filter: blur(75px); border-radius: 50%;
             z-index: 1; transition: background 0.8s ease;
             animation: pulseGlow 4s ease-in-out infinite alternate;
         }
@@ -242,10 +243,6 @@
         }
         footer { text-align: center; padding: 40px; color: #a0aab2; font-size: 0.9rem; background: var(--ink); border-top: 1px solid rgba(255,255,255,0.05); }
         @media (min-width: 768px) {
-            .hero-wrapper { flex-direction: row; text-align: right; justify-content: space-between; }
-            .hero-content { flex: 1; padding-left: 40px; }
-            .subtitle { margin-inline: 0; }
-            .btn-note { text-align: right; }
             .grid-3 { grid-template-columns: repeat(3, 1fr); }
             .trust-features { grid-template-columns: 1fr 1fr; }
         }
@@ -255,15 +252,9 @@
 
     <header class="hero">
         <div class="container hero-wrapper">
-            <div class="hero-content">
+            <div class="hero-head">
                 <div class="hero-pill">📞 בפגישה? באמצע טיפול? על הסולם?</div>
                 <h1>להמשיך לעבוד בראש שקט.<br><span class="brand-name">פולואפ</span> תתפוס את הלקוח.</h1>
-                <p class="subtitle">אין צורך להילחץ משיחה שלא נענתה, ואין סיבה לעצור הכל. פולואפ מזהה שלא הייתה לך אפשרות לענות, ושולחת מיד הודעת וואטסאפ אנושית ומכבדת. הלקוחות מרגישים שראו אותם, נשארים איתך — ומאפשרים לך להמשיך לעבוד ברוגע.</p>
-                <a href="install.html" class="btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    הורדת בטא חינם
-                </a>
-                <span class="btn-note">אנדרואיד · הנתונים על המכשיר שלך · התחברות בקוד וואטסאפ</span>
             </div>
 
             <div class="phone-stage">
@@ -335,6 +326,15 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div class="hero-foot">
+                <p class="subtitle">אין צורך להילחץ משיחה שלא נענתה, ואין סיבה לעצור הכל. פולואפ מזהה שלא הייתה לך אפשרות לענות, ושולחת מיד הודעת וואטסאפ אנושית ומכבדת. הלקוחות מרגישים שראו אותם, נשארים איתך — ומאפשרים לך להמשיך לעבוד ברוגע.</p>
+                <a href="install.html" class="btn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    הורדת בטא חינם
+                </a>
+                <span class="btn-note">אנדרואיד · הנתונים על המכשיר שלך · התחברות בקוד וואטסאפ</span>
             </div>
         </div>
     </header>
